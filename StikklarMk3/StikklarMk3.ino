@@ -9,26 +9,103 @@
 #include <ax12.h>
 #include <BioloidController.h>
 #include <Commander.h>
-#include "nuke.h"
+// #include <FiniteStateMachine.h>
 
-Commander command = Commander();
-/* The Commander protocol has values of -100 to 100, x/y/z speed are in mm/s
- * To go faster than 100mm/s, we can use this speedMultiplier
- */
+
+#include "gait_engine.h"
+#include "wheel_engine.h"
+#include "poses.h"
+
+Commander command;
+WheelEngine wheelEngine;
+GaitEngine gaitEngine;
+
+// State DrivingState = State(enterDriving, updateDriving, exitDriving);
+// State WalkingState = State(enterWalking, updateWalking, exitWalking);
+// State GotoWalkingState = State(noop);
+// State GotoDriveStat = State(enterGotoDrivingState, updateGotoDrivingState, noop);
+
+// FSM fsm = FSM(WalkingState);
+
+// // Driving Mode
+// void enterDriving() {
+//     Serial.println("enter Driving State");
+//     gaitEngine.readPose();
+//     gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
+//     wheelEngine.readPose();
+//     wheelEngine.writeWheelMode();
+// }
+
+// void updateDriving() {
+//     wheelEngine.update();
+// }
+
+// void exitDriving() {
+//     Serial.println("exit Driving State");
+// }
+
+// // Walking Mode
+// void enterWalking() {
+//     Serial.println("enter Walking State");
+//     gaitEngine.readPose();
+//     gaitEngine.slowStart(2000);
+// }
+
+// void updateWalking() {
+//     gaitEngine.update();
+// }
+
+// void exitWalking() {
+//     Serial.println("exit Driving State");
+// }
+
+// // states where we will accept motion commands and respond appropriately
+
+
+// // transision states where we don't accept motion commands
+// void enterGotoDrivingState() {
+//     Serial.println("enter Goto Driving State");
+//     // we pick the point right under the coxa axle, 3sec should give two walk cycles
+//     gaitEngine.setStepToTarget(0, 0, DEFAULT_ENDPOINT_Z, 3000);
+//     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
+// }
+
+// void updateGotoDrivingState() {
+//     if ( !gaitEngine.isSteppingTo() ) {
+//         Serial.println("Done stepping into drive position");
+//         gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
+//         Serial.println("Driving stance achieved");
+//         fsm.transitionTo(DrivingState);
+//     }
+// }
+
+// void noop() {}
+
+
+
+#define WALK_MODE   1
+#define WHEEL_MODE  2
+
+// The Commander protocol has values of -100 to 100, x/y/z speed are in mm/s
+// To go faster than 100mm/s, we can use this speedMultiplier
 int speedMultiplier;
+int motionMode = WHEEL_MODE;
 
 void setup(){
     // set user LED as output
-    pinMode(0,OUTPUT);
+    pinMode(0, OUTPUT);
+    
+    ax12Init(1000000l);
     // setup IK
-    setupIK();
-    gaitSelect(RIPPLE);
+    gaitEngine.setupIK();
+    gaitEngine.gaitSelect(RIPPLE_SMOOTH);
     // setup serial for usage with the Commander
     command.begin(38400);
-
+    
     // wait, then check the voltage (LiPO safety)
     delay (1000);
     float voltage = (ax12GetRegister (1, AX_PRESENT_VOLTAGE, 1)) / 10.0;
+    Serial.println ("== Stikklar Mk3 ==");
     Serial.print ("System Voltage: ");
     Serial.print (voltage);
     Serial.println (" volts.");
@@ -37,56 +114,122 @@ void setup(){
         while(1);
     }
 
+    // the active engine initializes the current pose
+    gaitEngine.readPose();
+    wheelEngine.readPose();
+
+    Serial.println ("Poses read");
+
     // stand up slowly
-    bioloid.poseSize = 18;
-    bioloid.readPose();
-    doIK();
-    bioloid.interpolateSetup(1000);
-    while(bioloid.interpolating > 0){
-        bioloid.interpolateStep();
-        delay(3);
+    gaitEngine.slowStart(1000);
+    
+    Serial.println ("Done standing up");
+
+    if(motionMode == WHEEL_MODE) {
+        Serial.println("Wheel mode enabled");
+        gaitEngine.doPose(WHEEL_MODE_MIDDLE, 1000);
+        wheelEngine.readPose();
+        wheelEngine.writeWheelMode();
+        Serial.println ("Entered wheel pose");
+    } else if (motionMode == WALK_MODE) {
+        Serial.println("Walking mode enabled");
+    } else {
+        Serial.print("Unknown mode: ");
+        Serial.println(motionMode);
     }
+
     speedMultiplier = 1;
 }
 
-void processCommands(){
-  // take commands
-  if(command.ReadMsgs() > 0){
-    digitalWrite(0,HIGH-digitalRead(0));
-    // select gaits
-    if(command.buttons&BUT_R1){ gaitSelect(RIPPLE_SMOOTH); speedMultiplier=1;}
-    if(command.buttons&BUT_R2){ gaitSelect(RIPPLE); speedMultiplier=1;}
-    if(command.buttons&BUT_L4){ gaitSelect(AMBLE_SMOOTH); speedMultiplier=2;}
-    if(command.buttons&BUT_L5){ gaitSelect(AMBLE); speedMultiplier=2;}
-    // set speeds
-    Xspeed = speedMultiplier*command.walkV;
-    if((command.buttons&BUT_LT) > 0){
-      Yspeed = (speedMultiplier*command.walkH)/2;
-      Rspeed = 0.0;
-    } else {
-      Rspeed = -(speedMultiplier*command.walkH)/250.0;
-      Yspeed = 0;
-    }
-    bodyRotY = (((float)command.lookV))/250.0;
+void setBodyRotation(Commander &command){
+    gaitEngine.bodyRotY = (((float)command.lookV))/250.0;
     if((command.buttons&BUT_RT) > 0) {
-      bodyRotX = ((float)command.lookH)/250.0;
-      bodyRotZ = 0.0;
+        gaitEngine.bodyRotX = ((float)command.lookH)/250.0;
+        gaitEngine.bodyRotZ = 0.0;
     } else {
-      bodyRotZ = ((float)command.lookH)/250.0;
-      bodyRotX = 0.0;
+        gaitEngine.bodyRotZ = ((float)command.lookH)/250.0;
+        gaitEngine.bodyRotX = 0.0;
     }
-  } 
+}
+
+void setCenterOfGravityOffset(Commander &command){
+    // we invert the joystick values since we ned to shift the legs in the opposite direction to move the body correctly
+    // can move upto move 125mm in each direction
+    if((command.buttons&BUT_RT) == 0) {
+        // move on the XY ground plane
+        gaitEngine.centerOfGravityOffset.x = -(int)command.lookV;
+        gaitEngine.centerOfGravityOffset.y = -(int)command.lookH;
+        gaitEngine.centerOfGravityOffset.z = 0;
+    } else {
+        // move up or down
+        gaitEngine.centerOfGravityOffset.x = 0;
+        gaitEngine.centerOfGravityOffset.y = 0;
+        gaitEngine.centerOfGravityOffset.z = (int)command.lookV;
+    }
+}
+
+void setWalkMovement(Commander &command){
+    gaitEngine.Xspeed = speedMultiplier*command.walkV;
+    if((command.buttons&BUT_LT) > 0){
+        gaitEngine.Yspeed = (speedMultiplier*command.walkH)/2;
+        gaitEngine.Rspeed = 0.0;
+    } else {
+        gaitEngine.Rspeed = -(speedMultiplier*command.walkH)/250.0;
+        gaitEngine.Yspeed = 0;
+    }
+}
+
+void setGaitMode(Commander &command) {
+    if(command.buttons&BUT_R1) { 
+        gaitEngine.gaitSelect( RIPPLE_SMOOTH );
+        speedMultiplier=1;
+
+    } else if(command.buttons&BUT_R2) {
+        gaitEngine.gaitSelect( RIPPLE );
+        speedMultiplier=1;
+
+    } else if(command.buttons&BUT_L4) { 
+        gaitEngine.gaitSelect( AMBLE_SMOOTH );
+        speedMultiplier=2;
+
+    } else if(command.buttons&BUT_L5) {
+        gaitEngine.gaitSelect( AMBLE );
+        speedMultiplier=2;
+    }
+}
+
+void setWheelMovement(Commander &command) {
+    // max 1024 => speed 125*8 => 500
+    wheelEngine.speed = command.walkV * 8;
+    // max steer angle => 154, 125
+    wheelEngine.steering = command.lookH;
+}
+
+void processCommands() {
+    // take commands
+    if(command.ReadMsgs() == 0)
+        return;
+    // toggle LED
+    digitalWrite(0,HIGH-digitalRead(0));
+    // set speeds
+    //if ( fsm.isInState(WalkingState) ) {
+    if ( motionMode == WALK_MODE ) {
+        setGaitMode(command);
+        setWalkMovement(command);
+        setCenterOfGravityOffset(command);
+        //setBodyRotation(command);
+    //} else if ( fsm.isInState(DrivingState) ) {
+    } else if ( motionMode == WHEEL_MODE ) {
+        setWheelMovement(command);
+    }
 }
 
 void processMotion(){
-  // if our previous interpolation is complete, recompute the IK
-  if(bioloid.interpolating == 0){
-    doIK();
-    bioloid.interpolateSetup(tranTime);
-  }
-
-  // update joints
-  bioloid.interpolateStep();
+    if (motionMode == WALK_MODE) {
+        gaitEngine.update();
+    } else if (motionMode == WHEEL_MODE) {
+        wheelEngine.update();
+    }
 }
 
 void processSensors(){
@@ -96,8 +239,10 @@ void processSensors(){
 }
 
 void loop(){
-  processCommands();
-  processSensors();
-  processMotion();
+    processCommands();
+    //processSensors();
+    processMotion();
+
+    //fsm.update();
 }
 
