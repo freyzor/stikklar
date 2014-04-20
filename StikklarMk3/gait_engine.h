@@ -58,7 +58,9 @@ public:
 	ik_req_t centerOfGravityOffset;
 private:
 	BioloidController _controller;
+	// offset from leg joint relative to body
 	ik_req_t endpoints[LEG_COUNT];
+	// offset from leg joint relative to body
 	ik_req_t currentEndpoints[LEG_COUNT];
 	int tranTime;
 	float cycleTime;
@@ -67,6 +69,7 @@ private:
 	int step;
 	int currentGait;
 	int gaitLegNo[LEG_COUNT];   // order to move legs in
+	// relative to leg quadrant
 	ik_req_t gaits[LEG_COUNT];  // gait position
 	int pushSteps;
 	ik_req_t nextEndPoint;

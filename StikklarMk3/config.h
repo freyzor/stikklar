@@ -85,4 +85,17 @@
 #define LR_COXA_WHEEL_NEUTRAL 368	// 13
 #define RR_COXA_WHEEL_NEUTRAL 669	// 5
 
+
+
+#define log(x) Serial.print(x)
+#define logln(x) Serial.println(x)
+#define logvec(n, v) log(n); log(": ("); log(v.x); log(", "); log(v.y); log(", "); log(v.z); logln(")");
+
+
+#ifdef DEBUG
+	#define debug_msg(msg) log(millis()); logln(msg);
+#else
+	#define debug_msg(msg)
+#endif
+
 #endif

@@ -74,6 +74,7 @@ void GaitEngine::setEndpoints(int x, int y, int z){
     endpoints[RIGHT_FRONT].x = x;
     endpoints[RIGHT_FRONT].y = y;
     endpoints[RIGHT_FRONT].z = z;
+
     endpoints[RIGHT_REAR].x = -x;
     endpoints[RIGHT_REAR].y = y;
     endpoints[RIGHT_REAR].z = z;
@@ -162,9 +163,14 @@ void GaitEngine::doLegIK(int legId, int coxaId, int femurId, int tibiaId){
 
     // combine and adjust the result for the leg position
     endpoint = addPoints(endpoint, req);
-    adjustEndpointForLeg(legId, endpoint);
+    // store the endpoint currently assigned
     currentEndpoints[legId] = endpoint;
+    // Translate endpoint to leg space for for IK solving
+    adjustEndpointForLeg(legId, endpoint);
     // solve the IK
+ //    if(currentGait == RIPPLE_STEP_TO) {
+ //    	log(legId); logvec("EP", endpoint);
+	// }
     ik_sol_t sol = legIK(endpoint.x, endpoint.y, endpoint.z);
 
     setJointValue(legId, coxaId, sol.coxa);
@@ -198,6 +204,8 @@ void GaitEngine::printServoError(int legId, int jointId, int servoValue){
 // Select a new gait
 void GaitEngine::gaitSelect(int GaitType){
 	if(GaitType == currentGait) return;
+
+	log("gaitSelect:"); logln(GaitType);
 
 	currentGait = GaitType;
 	tranTime = STD_TRANSITION;
@@ -250,7 +258,6 @@ void GaitEngine::gaitSelect(int GaitType){
 		stepsInCycle = 8;
 		tranTime = 65;
 	}else if(GaitType == RIPPLE_STEP_TO){
-		
 		setupStepToGait();
 	}
 
@@ -259,6 +266,7 @@ void GaitEngine::gaitSelect(int GaitType){
 	}
 	step = 0;
 }
+
 // this would immediately be followd by gaitSelect
 void GaitEngine::setupStepToGait() {
 	gaitGen = &GaitEngine::StepToGaitGen;
@@ -275,19 +283,24 @@ void GaitEngine::setupStepToGait() {
 	stepToVector.x = (nextEndPoint.x - currentEndpoints[RIGHT_FRONT].x)/float(cyclesToComplete) + 0.5;
 	stepToVector.y = (nextEndPoint.y - currentEndpoints[RIGHT_FRONT].y)/float(cyclesToComplete) + 0.5;
 
+	// log("Step to setup: counter: ");
+	// log(stepToStepCounter);
+	// log(" vec("); log(stepToVector.x); log(", "); log(stepToVector.y); logln(")"); 
+
 	for (int legId=0; legId < LEG_COUNT; legId++) {
 		// set gait offset as the the vector to from new target to current position
-		gaits[legId].x = xForLeg(legId, nextEndPoint.x) - currentEndpoints[legId].x;
-		gaits[legId].y = yForLeg(legId, nextEndPoint.y) - currentEndpoints[legId].y;
+		gaits[legId].x = currentEndpoints[legId].x - xForLeg(legId, nextEndPoint.x);
+		gaits[legId].y = currentEndpoints[legId].y - yForLeg(legId, nextEndPoint.y);
 		gaits[legId].z = 0;
+		// log(legId); logvec(" currEp", currentEndpoints[legId]);
+		// log(legId); logvec(" gait", gaits[legId]);
+		// delay(50);
 	}
 	setEndpoints(
 		nextEndPoint.x,
 		nextEndPoint.y,
 		nextEndPoint.z
 	);
-
-	gaitSelect(RIPPLE_STEP_TO);
 }
 
 // this would immediately be followd by gaitSelect
@@ -296,6 +309,8 @@ void GaitEngine::setStepToTarget(int x, int y, int z, long msec) {
 	nextEndPoint.y = y;
 	nextEndPoint.z = z;
 	stepToMSec = msec;
+	// reset the gait in case we retrigger the same, which is fine with new params
+	currentGait = -1;
 }
 
 bool GaitEngine::isMoving() {
@@ -379,31 +394,32 @@ ik_req_t GaitEngine::SmoothGaitGen(int leg) {
 }
 
 // this will only work for symetric endpoints
-ik_req_t GaitEngine::StepToGaitGen(int leg){
+ik_req_t GaitEngine::StepToGaitGen(int legId){
 	if( stepToStepCounter > 0 ){
 	    // are we moving?
-	    if(step == gaitLegNo[leg]){
+	    if(step == gaitLegNo[legId]){
 			// leg up, middle position
-			gaits[leg].z = -liftHeight;
-			gaits[leg].r = 0;
-	    }else if((step == gaitLegNo[leg]+1) && (gaits[leg].z < 0)){
+			gaits[legId].z = -liftHeight;
+			gaits[legId].r = 0;
+	    }else if((step == gaitLegNo[legId]+1) && (gaits[legId].z < 0)){
 			// leg down position     
-			gaits[leg].x -= xForLeg(leg, stepToVector.x);
-			gaits[leg].y -= yForLeg(leg, stepToVector.y);
-			gaits[leg].z = 0;                                               
-			gaits[leg].r = 0;
+			gaits[legId].x += xForLeg(legId, stepToVector.x);
+			gaits[legId].y += yForLeg(legId, stepToVector.y);
+			gaits[legId].z = 0;                                               
+			gaits[legId].r = 0;
+			// log(legId); logvec(" leg", gaits[legId]);
 	    }else{
 	    	// stay put
-			gaits[leg].z = 0;
+			gaits[legId].z = 0;
 		}
 		stepToStepCounter--;
 	}else{ // stopped
-		gaits[leg].x = 0;
-		gaits[leg].y = 0;
-		gaits[leg].z = 0;                                               
-		gaits[leg].r = 0;
+		gaits[legId].x = 0;
+		gaits[legId].y = 0;
+		gaits[legId].z = 0;                                               
+		gaits[legId].r = 0;
 	}
-	return gaits[leg];
+	return gaits[legId];
 }
 
 bool GaitEngine::isSteppingTo() {
