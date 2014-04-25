@@ -6,7 +6,8 @@
 #include <BioloidController.h>
 #include <Commander.h>
 #include <FiniteStateMachine.h>
-
+#include <vmath.h>
+#include <Wire.h>
 
 #include "gait_engine.h"
 #include "wheel_engine.h"
@@ -15,6 +16,7 @@
 Commander command;
 WheelEngine wheelEngine;
 GaitEngine gaitEngine;
+
 
 State DrivingState = State(enterDriving, updateDriving, noop);
 State WalkingState = State(enterWalking, updateWalking, noop);
@@ -27,9 +29,7 @@ void noop() {}
 
 // ************ Driving Mode *************
 void enterDriving() {
-    logln("enter Driving State");
-    //gaitEngine.readPose();
-    //gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
+    debug_msg("enter Driving State");
     wheelEngine.readPose();
     wheelEngine.writeWheelMode();
 }
@@ -40,7 +40,7 @@ void updateDriving() {
 
 // ********** Walking Mode **************
 void enterWalking() {
-    logln("enter Walking State");
+    debug_msg("enter Walking State");
     gaitEngine.gaitSelect(RIPPLE_SMOOTH);
 }
 
@@ -49,23 +49,23 @@ void updateWalking() {
 }
 
 void exitWalking() {
-    logln("exit Driving State");
+    debug_msg("exit Driving State");
 }
 
 // ******* Goto Driving transision state **********
 void enterGotoDrivingState() {
-    logln("enter Goto Driving State");
+    debug_msg("enter Goto Driving State");
     // we pick the point right under the coxa axle, 3sec should give two walk cycles
     gaitEngine.setStepToTarget(1, 1, DEFAULT_ENDPOINT_Z, 3000);
     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
-    logln("driving goto set");
+    debug_msg("driving goto set");
 }
 
 void updateGotoDrivingState() {
     if ( !gaitEngine.isSteppingTo() ) {
-        logln("Done stepping into drive position");
+        debug_msg("Done stepping into drive position");
         gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
-        logln("Driving stance achieved");
+        debug_msg("Driving stance achieved");
         fsm.transitionTo(DrivingState);
     } else {
         gaitEngine.update();
@@ -74,19 +74,19 @@ void updateGotoDrivingState() {
 
 // ******* Goto Driving transision state **********
 void enterGotoWalkingState() {
-    logln("enter Goto Walking State");
+    debug_msg("enter Goto Walking State");
     gaitEngine.readPose();
     gaitEngine.doPose(WHEEL_CRAB_MIDDLE, 2000);
-    logln("Driving crab stance achieved");
+    debug_msg("Driving crab stance achieved");
     // go to the default walking stance, 3sec should give two walk cycles
     gaitEngine.setStepToTarget(DEFAULT_ENDPOINT_X, DEFAULT_ENDPOINT_Y, DEFAULT_ENDPOINT_Z, 3000);
     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
-    logln("Walking goto set");
+    debug_msg("Walking goto set");
 }
 
 void updateGotoWalkingState() {
     if ( !gaitEngine.isSteppingTo() ) {
-        logln("Done stepping into default position");
+        debug_msg("Done stepping into default position");
         fsm.transitionTo(WalkingState);
     } else {
         gaitEngine.update();
@@ -107,9 +107,10 @@ void setup(){
     gaitEngine.gaitSelect(RIPPLE_SMOOTH);
     // setup serial for usage with the Commander
     command.begin(38400);
-    
+  
     // wait, then check the voltage (LiPO safety)
     delay (1000);
+
     float voltage = (ax12GetRegister (1, AX_PRESENT_VOLTAGE, 1)) / 10.0;
     Serial.println ("== Stikklar Mk3 ==");
     Serial.print ("System Voltage: ");
@@ -127,13 +128,13 @@ void setup(){
 }
 
 void setBodyRotation(Commander &command){
-    gaitEngine.bodyRotY = (((float)command.lookV))/250.0;
+    gaitEngine.bodyRot.y = (((float)command.lookV))/250.0;
     if((command.buttons&BUT_RT) > 0) {
-        gaitEngine.bodyRotX = ((float)command.lookH)/250.0;
-        gaitEngine.bodyRotZ = 0.0;
+        gaitEngine.bodyRot.x = ((float)command.lookH)/250.0;
+        gaitEngine.bodyRot.z = 0.0;
     } else {
-        gaitEngine.bodyRotZ = ((float)command.lookH)/250.0;
-        gaitEngine.bodyRotX = 0.0;
+        gaitEngine.bodyRot.z = ((float)command.lookH)/250.0;
+        gaitEngine.bodyRot.x = 0.0;
     }
 }
 
@@ -173,6 +174,10 @@ void setGaitMode(Commander &command) {
         gaitEngine.gaitSelect( RIPPLE );
         speedMultiplier=1;
 
+    } else if(command.buttons&BUT_R3) {
+        gaitEngine.gaitSelect( RIPPLE_GEO );
+        speedMultiplier=1;
+
     } else if(command.buttons&BUT_L4) { 
         gaitEngine.gaitSelect( AMBLE_SMOOTH );
         speedMultiplier=2;
@@ -190,12 +195,19 @@ void setWheelMovement(Commander &command) {
     wheelEngine.steering = command.lookH;
 }
 
+void setSpeechCommands(Commander &command) {
+    // if (command.buttons & BUT_R3) {
+    //     speech.say("What do you want?");
+    // }
+}
+
 void processCommands() {
     // take commands
     if(command.ReadMsgs() == 0)
         return;
     // toggle LED
     digitalWrite(0,HIGH-digitalRead(0));
+    setSpeechCommands(command);
     // set speeds
     if ( fsm.isInState(WalkingState) ) {
         if (command.buttons & BUT_L6) {

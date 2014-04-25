@@ -1,10 +1,8 @@
 #ifndef _GAIT_ENGINE_H
 #define _GAIT_ENGINE_H
 
-#include <ax12.h>
 #include <BioloidController.h>
-#include <Arduino.h>
-#include "config.h"
+#include <vmath.h>
 #include "inverse_kinematic.h"
 
 #define GaitSetup (*this.*gaitSetup)
@@ -26,6 +24,8 @@
 #define AMBLE_SMOOTH            3
 // special ripple gait to switch endpoins
 #define RIPPLE_STEP_TO 			5
+// geo stable ripple gait
+#define RIPPLE_GEO				6
 
 // Standard Transition time should be of the form (k*BIOLOID_FRAME_LENGTH)-1
 // for maximal accuracy. BIOLOID_FRAME_LENGTH = 33ms, so good options include:
@@ -44,24 +44,31 @@ public:
 	void setStepToTarget(int x, int y, int z, long msec);
 	bool isSteppingTo();
 
+	// float bodyRotX;    // body roll
+	// float bodyRotY;    // body pitch
+	// float bodyRotZ;    // body rotation
+	// int bodyPosX;
+	// int bodyPosY;
+
     //Parameters for manipulating body position 
-	float bodyRotX;    // body roll
-	float bodyRotY;    // body pitch
-	float bodyRotZ;    // body rotation
-	int bodyPosX;
-	int bodyPosY;
+	vec3 bodyRot;
+	vec2 bodyPos;
 
 	// Parameters for gait manipulation */
 	int Xspeed;
 	int Yspeed;
 	float Rspeed;
+	// bodyPos already does x,y of this it seems
 	ik_req_t centerOfGravityOffset;
 private:
 	BioloidController _controller;
 	// offset from leg joint relative to body
-	ik_req_t endpoints[LEG_COUNT];
+	ik_req_t defaultFootPositions[LEG_COUNT];
 	// offset from leg joint relative to body
-	ik_req_t currentEndpoints[LEG_COUNT];
+	ik_req_t currentFootPositions[LEG_COUNT];
+
+	char  legJoints[4][3];
+
 	int tranTime;
 	float cycleTime;
 	int stepsInCycle;
@@ -80,25 +87,42 @@ private:
 	// Gait methods
 	// implemented gait types methods
 	void DefaultGaitSetup() {};
-	ik_req_t DefaultGaitGen(int leg);
-	ik_req_t SmoothGaitGen(int leg);
-	ik_req_t StepToGaitGen(int leg);
+	ik_req_t DefaultGaitGen(char leg);
+	ik_req_t SmoothGaitGen(char leg);
+	ik_req_t StepToGaitGen(char leg);
 	void setupStepToGait();
 
-	void doLegIK(int legId, int coxaId, int femurId, int tibiaId);
+	// void doLegIK(int legId, int coxaId, int femurId, int tibiaId);
 	void doIK();
 	// setup the starting positions of the legs.
-	void setEndpoints(int x, int y, int z);
+	void setDefaultFootPosition(int x, int y, int z);
 
 	// helpers
-	void printServoError(int legId, int jointId, int servoValue);
-	void setJointValue(int legId, int jointId, int rawValue);
+	void printServoError(char legId, char jointId, int servoValue);
+	void setJointValue(char legId, char jointId, int rawValue);
 	bool isMoving();
 	bool isAtEndpoints();
 
 	// gait function pointers
-	ik_req_t (GaitEngine::*gaitGen)(int leg);
+	ik_req_t (GaitEngine::*gaitGen)(char leg);
 	void (GaitEngine::*gaitSetup)();
+
+
+	// COG - center of gravity
+	bool isCogCompensationEnabled;
+	float amp_LeftRight;
+	float amp_FrontBack;
+	vec2 calculateDesiredCOG(float t);
+	vec2 calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b);
+	vec2 calculateIntersection(vec2 rf, vec2 lf, vec2 lr, vec2 rr);
+
+	void setupGeoRippleGait();
+
+	// gait update steps
+	void updateGaitAndFootPositions();
+	void updateCOG();
+	void adjustFootPositionsByBodyFrame();
+	void solveAndUpdateLegJoints();
 };
 
 #endif

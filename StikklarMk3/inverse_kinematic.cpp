@@ -7,11 +7,12 @@ int radToServo(float rads){
 }
 
 // Body IK solver: compute where legs should be.
-ik_req_t bodyIK(
-	float bodyRotX, float bodyRotY, float bodyRotZ,
-	int bodyPosX, int bodyPosY,
-	int X, int Y, int Z, 
-	int Xdisp, int Ydisp, float Zrot){
+ik_req_t bodyIK2(
+    	float bodyRotX, float bodyRotY, float bodyRotZ,
+    	int bodyPosX, int bodyPosY,
+    	int X, int Y, int Z, 
+    	int Xdisp, int Ydisp, float Zrot)
+{
     ik_req_t ans;
 
     float cosB = cos(bodyRotX);
@@ -31,8 +32,40 @@ ik_req_t bodyIK(
     return ans;
 }
 
+ik_req_t bodyIK(vec3 bodyRot, vec2 bodyPos, ik_req_t footPos, vec2 offset)
+{
+    ik_req_t ans;
+
+    // TODO: this part can be computed once for all legs
+    float cosB = cos(bodyRot.x);
+    float sinB = sin(bodyRot.x);
+    float cosG = cos(bodyRot.y);
+    float sinG = sin(bodyRot.y);
+    float cosA = cos(bodyRot.z + footPos.r);
+    float sinA = sin(bodyRot.z + footPos.r);
+
+    int totalX = footPos.x + offset.x + bodyPos.x;
+    int totalY = footPos.y + offset.y + bodyPos.y;
+
+    float t1 = totalX*cosG;
+    float t2 = totalY*sinB*sinG;
+    float t3 = footPos.z*cosB*sinG;
+    float t4 = totalY*cosB;
+    float t5 = footPos.z*sinB;
+
+    ans.x = totalX - int(t1*cosA + t2*cosA + t3*cosA - t4*sinA + t5*sinA) + bodyPos.x;
+    ans.y = totalY - int(t1*sinA + t2*sinA + t3*sinA + t4*cosA - t5*cosA) + bodyPos.y;
+    ans.z = footPos.z - int(-totalX*sinG + totalY*sinB*cosG + footPos.z*cosB*cosG);
+
+    return ans;
+}
+
+ik_sol_t legIK(ik_req_t footPos) {
+    return legIK(footPos.x, footPos.y, footPos.z);
+}
+
 // Simple 3dof leg solver. X,Y,Z are the length from the Coxa rotate to the endpoint.
-ik_sol_t legIK(int X, int Y, int Z){
+ik_sol_t legIK(int X, int Y, int Z) {
     // NOTE: we can solve this in squared space, should be faster
     ik_sol_t ans;
 
@@ -66,14 +99,35 @@ ik_req_t addPoints(ik_req_t &a, ik_req_t &b)
 }
 
 void adjustEndpointForLeg(int legId, ik_req_t &endpoint){
-    if (legId == RIGHT_REAR){
-        endpoint.x = -endpoint.x;
-    } else if (legId == LEFT_FRONT){
-        endpoint.y = -endpoint.y;
-    } else if (legId == LEFT_REAR) {
-        endpoint.x = -endpoint.x;
-        endpoint.y = -endpoint.y;
+    adjustForQuadrant(legId, endpoint.x, endpoint.y);
+}
+
+void adjustForQuadrant(int quadId, int &x, int &y) {
+    if (quadId == RIGHT_REAR){
+        x = -x;
+    } else if (quadId == LEFT_FRONT) {
+        y = -y;
+    } else if (quadId == LEFT_REAR) {
+        x = -x;
+        y = -y;
     }
+}
+
+void adjustForQuadrant(int quadId, float &x, float &y) {
+    if (quadId == RIGHT_REAR){
+        x = -x;
+    } else if (quadId == LEFT_FRONT) {
+        y = -y;
+    } else if (quadId == LEFT_REAR) {
+        x = -x;
+        y = -y;
+    }
+}
+
+vec2 getForQuadrant(int quadId, const vec2 &v) {
+    vec2 vv = v;
+    adjustForQuadrant(quadId, vv.x, vv.y);
+    return vv;
 }
 
 int getXdisp(int legId) {
