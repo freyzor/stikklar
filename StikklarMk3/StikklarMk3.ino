@@ -95,7 +95,7 @@ void updateGotoWalkingState() {
 
 // The Commander protocol has values of -100 to 100, x/y/z speed are in mm/s
 // To go faster than 100mm/s, we can use this speedMultiplier
-int speedMultiplier;
+float speedMultiplier;
 
 void setup(){
     // set user LED as output
@@ -176,7 +176,7 @@ void setGaitMode(Commander &command) {
 
     } else if(command.buttons&BUT_R3) {
         gaitEngine.gaitSelect( RIPPLE_GEO );
-        speedMultiplier=1;
+        speedMultiplier=0.5;
 
     } else if(command.buttons&BUT_L4) { 
         gaitEngine.gaitSelect( AMBLE_SMOOTH );

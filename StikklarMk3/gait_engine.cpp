@@ -218,6 +218,10 @@ void GaitEngine::doIK() {
     if (isCogCompensationEnabled) {
     	updateCOG();
 	}
+	else { 
+		bodyPos.x = 0;
+		bodyPos.y = 0;
+	}
     adjustFootPositionsByBodyFrame();
     solveAndUpdateLegJoints();
 
@@ -225,7 +229,6 @@ void GaitEngine::doIK() {
 
     //delay(3000);
 }
-
 
 void GaitEngine::printServoError(char legId, char jointId, int servoValue){
     Serial.print(LEG_NAMES[legId]);
@@ -307,13 +310,14 @@ void GaitEngine::gaitSelect(int GaitType){
 void GaitEngine::setupGeoRippleGait() {
 	gaitGen = &GaitEngine::SmoothGaitGen;
 	gaitSetup = &GaitEngine::DefaultGaitSetup;
-	gaitLegNo[RIGHT_FRONT] = 0;
-	gaitLegNo[LEFT_REAR] = 4;
-	gaitLegNo[LEFT_FRONT] = 8;
-	gaitLegNo[RIGHT_REAR] = 12;
+	gaitLegNo[LEFT_FRONT] = 0;
+	gaitLegNo[RIGHT_REAR] = 4;
+	gaitLegNo[RIGHT_FRONT] = 8;
+	gaitLegNo[LEFT_REAR] = 12;
 	pushSteps = 12;
 	stepsInCycle = 16;
 	isCogCompensationEnabled = true;
+	tranTime = 33*6-1;
 }
 
 // this would immediately be followd by gaitSelect
@@ -477,68 +481,39 @@ vec2 GaitEngine::calculateDesiredCOG(float t) {
 		legpos[legId].y = currentFootPositions[legId].y + getYdisp(legId);
 	}
 	// compute center by dividing 
-	vec2 cog = calculateIntersection(
+	vec2 cog;
+	lineIntersection(
 		legpos[RIGHT_FRONT],
-		legpos[LEFT_FRONT],
 		legpos[LEFT_REAR],
-		legpos[RIGHT_REAR]
+		legpos[LEFT_FRONT],
+		legpos[RIGHT_REAR],
+		cog
 	);
 	// X_cog = X_c + a_lr*A_lr*sin(wt+(pi/2))+a_fb*A_fb*sin(2wt)
-	// w = 2*pi*f 
-	// f is the frequency of the gate
+	// w = 2*pi*f , f is not neede as it is aleady factored into t
 	vec2 A_lr = calculateCogVector(cog, legpos[LEFT_FRONT], legpos[LEFT_REAR]);
 	vec2 A_fb = calculateCogVector(cog, legpos[LEFT_FRONT], legpos[RIGHT_FRONT]);
+	
 	// TODO: move into a setup func
-	amp_LeftRight = 0.5;
+	amp_LeftRight = 0.25;
 	amp_FrontBack = 0.1;
-	float f = 1.0 / cycleTime;
-	float w = M_2_PI * f;
 
 	// precompute these factors
-	float m_lr = sin(w*t + M_PI_2) * amp_LeftRight;
-	float m_fb = sin(2*w*t) * amp_FrontBack;
+	float m_lr = sin((M_2_PI*t) - M_PI_2) * amp_LeftRight;
+	float m_fb = sin(2*M_2_PI*t) * amp_FrontBack;
 
-	cog = cog + (A_lr*m_lr) + (A_fb*m_fb);
+	cog = -(cog + (A_lr*m_lr) + (A_fb*m_fb));
+	//logvec2("cog", cog);
 	return cog;
 }
 
 vec2 GaitEngine::calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b) {
-	// make relative to center
-	leg_a.sub(cog);
-	leg_b.sub(cog);
-	// distance to a
-	float dist_a_sq = leg_a.lenSq();
-	float dist_a = sqrt(dist_a_sq);
-	// distance to b
-	float dist_b_sq = leg_b.lenSq();
-	float dist_b = sqrt(dist_b_sq);
-	// distance between a and b = c
-	vec2 c = leg_b;
-	c.sub(leg_a);
-	float dist_c_sq = c.lenSq();
-	float dist_c = sqrt(dist_c_sq);
-	// law of cosines
-	float ang_C = acos((dist_a_sq + dist_a_sq - dist_c_sq) / 2*dist_a*dist_b);
-	float ang_A = acos((dist_b_sq + dist_c_sq - dist_a_sq) / 2*dist_b*dist_c);
-	ang_C = ang_C * 0.5;
-	float ang_B = M_PI - ang_A - ang_B;
-	// vector length
-	float dist_cc = dist_a * sin(ang_C) / sin(ang_B);
-	// adjust length
-	c.scale(dist_cc/dist_c);
-	// adding vector to a will give us the vector we seek
-	c.add(leg_a);
-	return c;
-}
-
-vec2 GaitEngine::calculateIntersection(vec2 rf, vec2 lf, vec2 lr, vec2 rr) {
-	// line rf lr
-	float sloap_a = (rf.x-lr.x) / (rf.y - lr.y);
-	// line lf rr
-	float sloap_b = (lf.x-rr.x) / (lf.y - rr.y);
-
-	vec2 intersect;
-	intersect.x = ((lf.y-sloap_b*lf.x) - (rf.y - sloap_a*rf.x)) / (sloap_b - sloap_a);
-	intersect.y = sloap_a*intersect.x + (rf.y - sloap_a*rf.x);
-	return intersect;
+	// find angle bisector vector
+	vec2 ca = leg_a - cog;
+	vec2 cb = leg_b - cog;
+	vec2 bisec = ca*cb.len() + cb*ca.len();
+	
+	lineIntersection(cog, cog+bisec, leg_a, leg_b, bisec);
+	bisec = bisec - cog;
+	return bisec;
 }

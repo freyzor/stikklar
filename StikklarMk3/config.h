@@ -90,7 +90,7 @@
 #define log(x) Serial.print(x)
 #define logln(x) Serial.println(x)
 #define logvec(n, v) log(n); log(": ("); log(v.x); log(", "); log(v.y); log(", "); log(v.z); logln(")");
-
+#define logvec2(n, v) log(n); log(": ("); log(v.x); log(", "); log(v.y); logln(")");
 
 #ifdef DEBUG
 	#define debug_msg(msg) log(millis()); logln(msg);

@@ -114,7 +114,6 @@ private:
 	float amp_FrontBack;
 	vec2 calculateDesiredCOG(float t);
 	vec2 calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b);
-	vec2 calculateIntersection(vec2 rf, vec2 lf, vec2 lr, vec2 rr);
 
 	void setupGeoRippleGait();
 
