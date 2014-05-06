@@ -40,19 +40,19 @@
 #define LR_FEMUR 14
 #define LR_TIBIA 15
 
-#define RF_COXA_SIGN 	-1
+#define RF_COXA_SIGN 	1
 #define RF_FEMUR_SIGN 	1
 #define RF_TIBIA_SIGN 	-1
 
-#define RR_COXA_SIGN 	1
+#define RR_COXA_SIGN 	-1
 #define RR_FEMUR_SIGN 	1
 #define RR_TIBIA_SIGN 	-1
 
-#define LF_COXA_SIGN 	1
+#define LF_COXA_SIGN 	-1
 #define LF_FEMUR_SIGN 	1
 #define LF_TIBIA_SIGN 	-1
 
-#define LR_COXA_SIGN 	-1
+#define LR_COXA_SIGN 	1
 #define LR_FEMUR_SIGN 	1
 #define LR_TIBIA_SIGN 	-1
 
@@ -70,10 +70,10 @@
 #define LR_WHEEL_SIGN 	-1
 #define RR_WHEEL_SIGN 	1
 
-#define RF_TURN_SIGN 	-1
-#define LF_TURN_SIGN 	-1
-#define LR_TURN_SIGN 	-1
-#define RR_TURN_SIGN 	-1
+#define RF_TURN_SIGN 	1
+#define LF_TURN_SIGN 	1
+#define LR_TURN_SIGN 	1
+#define RR_TURN_SIGN 	1
 
 #define MIN_ANGLE_DEG		0.29296875
 #define MIN_ANGLE_RAD		0.005113269292
@@ -91,6 +91,12 @@
 #define logln(x) Serial.println(x)
 #define logvec(n, v) log(n); log(": ("); log(v.x); log(", "); log(v.y); log(", "); log(v.z); logln(")");
 #define logvec2(n, v) log(n); log(": ("); log(v.x); log(", "); log(v.y); logln(")");
+#define logval(n, v) log(n); log(": "); logln(v);
+
+#define dlogstart(n) log("#"); log(n); log(","); log(millis());
+#define dlogend() logln("");
+#define dlogvec2(v) log(","); log(v.x); log(","); log(v.y);
+#define dlog(d) log(","); log(d);
 
 #ifdef DEBUG
 	#define debug_msg(msg) log(millis()); logln(msg);

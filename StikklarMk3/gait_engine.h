@@ -12,9 +12,9 @@
 #define minValue(n) mins[n-1]
 #define neutral(n) neutrals[n-1]
 
-#define DEFAULT_ENDPOINT_X 70  // front/back
-#define DEFAULT_ENDPOINT_Y 70  // right/left
-#define DEFAULT_ENDPOINT_Z 160 // down/up
+#define DEFAULT_ENDPOINT_X 90  // front/back
+#define DEFAULT_ENDPOINT_Y 90  // right/left
+#define DEFAULT_ENDPOINT_Z 150 // down/up
  
 // ripple gate move one leg at the time
 #define RIPPLE                  0
@@ -69,13 +69,17 @@ private:
 
 	char  legJoints[4][3];
 
+	long gaitStartTime;
 	int tranTime;
+	int cycleTimeMillis;
 	float cycleTime;
 	int stepsInCycle;
 	int liftHeight;
 	int step;
 	int currentGait;
 	int gaitLegNo[LEG_COUNT];   // order to move legs in
+	float currentCycleOffset;
+	float gaitLegOffset[LEG_COUNT];
 	// relative to leg quadrant
 	ik_req_t gaits[LEG_COUNT];  // gait position
 	int pushSteps;
@@ -91,6 +95,9 @@ private:
 	ik_req_t SmoothGaitGen(char leg);
 	ik_req_t StepToGaitGen(char leg);
 	void setupStepToGait();
+	
+	ik_req_t ContinuousGaitGen(char leg);
+	void ContinuousGaitSetup();
 
 	// void doLegIK(int legId, int coxaId, int femurId, int tibiaId);
 	void doIK();
@@ -119,7 +126,6 @@ private:
 
 	// gait update steps
 	void updateGaitAndFootPositions();
-	void updateCOG();
 	void adjustFootPositionsByBodyFrame();
 	void solveAndUpdateLegJoints();
 };

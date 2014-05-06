@@ -15,28 +15,28 @@ const char* LEG_NAMES[] = {
 };
 
 int mins[] = {
-	161, 162, 95, 0, 
-	70, 161, 95, 0, 
-	193, 162, 95, 0, 
-	41, 162, 95, 0};
+	60, 162, 95, 0, 
+	60, 161, 95, 0, 
+	60, 162, 95, 0, 
+	60, 162, 95, 0};
 
 int maxs[] = {
-	828, 850, 1005, 0, 
-	980, 852, 1005, 0, 
-	861, 864, 1005, 0, 
-	940, 840, 1005, 0};
+	960, 850, 1005, 0, 
+	960, 852, 1005, 0, 
+	960, 864, 1005, 0, 
+	960, 840, 1005, 0};
 
 int neutrals[] = {
-	508, 516, 754, 0, 
-	364, 494, 731, 0, 
-	510, 498, 748, 0, 
-	669, 506, 745, 0};
+	364, 516, 754, 0, 
+	669, 494, 731, 0, 
+	669, 498, 748, 0, 
+	364, 506, 745, 0};
 
 bool signs[] = {
-	false, true, false, false, 
 	true, true, false, false, 
-	true, true, false, true, 
-	false, true, false, true};
+	false, true, false, false, 
+	false, true, false, true, 
+	true, true, false, true};
 
 int signedValue(int n, int val) {
 	if (signs[n-1]) {
@@ -148,7 +148,7 @@ void GaitEngine::setupIK(){
     );
 
     // default 33
-    liftHeight = 60; 
+    liftHeight = 50; 
     stepsInCycle = 1;
     step = 0;
 }
@@ -203,37 +203,24 @@ void GaitEngine::solveAndUpdateLegJoints() {
 	}
 }
 
-void GaitEngine::updateCOG() {
-	// compute a t in [0, 1) from splace in duty cycle
-    // expectes lf, rr, rf, lr leg order
-    float t = step / float(stepsInCycle);
-    // we simply override the wanted body pos and let the bodyIK figure it out
-    bodyPos = calculateDesiredCOG(t);
-}
-
 void GaitEngine::doIK() {
     GaitSetup();
 
     updateGaitAndFootPositions();
     if (isCogCompensationEnabled) {
-    	updateCOG();
-	}
-	else { 
-		bodyPos.x = 0;
-		bodyPos.y = 0;
+	    // we simply override the wanted body pos and let the bodyIK figure it out
+	    bodyPos = calculateDesiredCOG(currentCycleOffset);
 	}
     adjustFootPositionsByBodyFrame();
     solveAndUpdateLegJoints();
 
     step = (step+1) % stepsInCycle;
-
-    //delay(3000);
 }
 
 void GaitEngine::printServoError(char legId, char jointId, int servoValue){
     Serial.print(LEG_NAMES[legId]);
     Serial.print(": servo #");
-    Serial.print(jointId);
+    Serial.print(int(jointId));
     Serial.print(" IK exceded limits: ");
     Serial.println(servoValue);
 }
@@ -301,23 +288,30 @@ void GaitEngine::gaitSelect(int GaitType){
 		setupGeoRippleGait();
 	}
 
-	if(cycleTime == 0) {
-		cycleTime = (stepsInCycle*tranTime)/1000.0;
+	if(cycleTimeMillis == 0) {
+		cycleTimeMillis = stepsInCycle*tranTime;
+		cycleTime = cycleTimeMillis / 1000.0;
 	}
 	step = 0;
 }
 
 void GaitEngine::setupGeoRippleGait() {
-	gaitGen = &GaitEngine::SmoothGaitGen;
-	gaitSetup = &GaitEngine::DefaultGaitSetup;
-	gaitLegNo[LEFT_FRONT] = 0;
-	gaitLegNo[RIGHT_REAR] = 4;
-	gaitLegNo[RIGHT_FRONT] = 8;
-	gaitLegNo[LEFT_REAR] = 12;
-	pushSteps = 12;
-	stepsInCycle = 16;
+	gaitGen = &GaitEngine::ContinuousGaitGen;
+	gaitSetup = &GaitEngine::ContinuousGaitSetup;
+	gaitLegOffset[LEFT_FRONT] = 0.0;
+	gaitLegOffset[RIGHT_REAR] = 0.25;
+	gaitLegOffset[RIGHT_FRONT] = 0.5;
+	gaitLegOffset[LEFT_REAR] = 0.75;
+
+	cycleTime = 2.0;
+	cycleTimeMillis = 2000;
+	gaitStartTime = 0;
+
 	isCogCompensationEnabled = true;
-	tranTime = 33*6-1;
+	tranTime = 65;
+
+	amp_LeftRight = 0.25;
+	amp_FrontBack = 0.2;
 }
 
 // this would immediately be followd by gaitSelect
@@ -342,11 +336,7 @@ void GaitEngine::setupStepToGait() {
 		gaits[legId].y = currentFootPositions[legId].y - yForLeg(legId, nextEndPoint.y);
 		gaits[legId].z = 0;
 	}
-	setDefaultFootPosition(
-		nextEndPoint.x,
-		nextEndPoint.y,
-		nextEndPoint.z
-	);
+	setDefaultFootPosition(nextEndPoint.x, nextEndPoint.y, nextEndPoint.z);
 }
 
 // this would immediately be followd by gaitSelect
@@ -473,6 +463,7 @@ bool GaitEngine::isSteppingTo() {
 }
 
 vec2 GaitEngine::calculateDesiredCOG(float t) {
+	// logval("t", t);
 	// t is a value from 0 to 1 for where we are in the walk cycle
 	// compute leg positins relative to robot center
 	vec2 legpos[4];
@@ -489,22 +480,30 @@ vec2 GaitEngine::calculateDesiredCOG(float t) {
 		legpos[RIGHT_REAR],
 		cog
 	);
+
 	// X_cog = X_c + a_lr*A_lr*sin(wt+(pi/2))+a_fb*A_fb*sin(2wt)
 	// w = 2*pi*f , f is not neede as it is aleady factored into t
 	vec2 A_lr = calculateCogVector(cog, legpos[LEFT_FRONT], legpos[LEFT_REAR]);
 	vec2 A_fb = calculateCogVector(cog, legpos[LEFT_FRONT], legpos[RIGHT_FRONT]);
-	
-	// TODO: move into a setup func
-	amp_LeftRight = 0.25;
-	amp_FrontBack = 0.1;
 
 	// precompute these factors
 	float m_lr = sin((M_2_PI*t) - M_PI_2) * amp_LeftRight;
 	float m_fb = sin(2*M_2_PI*t) * amp_FrontBack;
 
-	cog = -(cog + (A_lr*m_lr) + (A_fb*m_fb));
-	//logvec2("cog", cog);
-	return cog;
+	vec2 out = -cog - ((A_lr*m_lr) - (A_fb*m_fb));
+
+	// dlogstart("cog");
+	// dlog(t);
+	// dlogvec2(cog);
+	// dlogvec2(out);
+	// dlogvec2(A_lr);
+	// dlogvec2(A_fb);
+	// for (int legId=0; legId < 4; legId++){
+	// 	dlogvec2(legpos[legId]);
+	// 	dlog(currentFootPositions[legId].z);
+	// }
+	// dlogend();
+	return out;
 }
 
 vec2 GaitEngine::calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b) {
@@ -516,4 +515,43 @@ vec2 GaitEngine::calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b) {
 	lineIntersection(cog, cog+bisec, leg_a, leg_b, bisec);
 	bisec = bisec - cog;
 	return bisec;
+}
+
+// Continouse gait generation
+ik_req_t GaitEngine::ContinuousGaitGen(char legId) {
+	if( isMoving() ) {
+		float t = currentCycleOffset - gaitLegOffset[legId];
+		// normalize to range [0, 1)
+		if (t < 0.0) { t += 1.0; }
+
+		if(t < 0.25)
+		{
+			// an sinodal s curve from 0 to 1
+			float distance = (1 + cos(M_PI + t*M_PI*4)) * 0.5;
+			// relocate leg
+			gaits[legId].x = Xspeed * distance;
+			gaits[legId].y = Yspeed * distance;
+			gaits[legId].z = -liftHeight * sin(t*M_PI*4);
+			gaits[legId].r = Rspeed * distance;
+		} else {
+			// move body forward
+			// to interpolate over entire range 75% duty cycle
+			float distance = 1.0 - (t - 0.25) / 0.75;
+			gaits[legId].x = Xspeed * distance;
+			gaits[legId].y = Yspeed * distance;
+			gaits[legId].z = 0;
+			gaits[legId].r = Rspeed * distance;
+		}
+	} else { // stopped
+		gaits[legId].z = 0;
+	}
+	return gaits[legId];
+}
+
+void GaitEngine::ContinuousGaitSetup() {
+	if (gaitStartTime == 0) {
+		gaitStartTime = millis();
+	}
+	int millisIntoCycle = (millis() - gaitStartTime) % cycleTimeMillis;
+	currentCycleOffset = millisIntoCycle / float(cycleTimeMillis);
 }

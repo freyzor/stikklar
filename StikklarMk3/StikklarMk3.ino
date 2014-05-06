@@ -109,7 +109,7 @@ void setup(){
     command.begin(38400);
   
     // wait, then check the voltage (LiPO safety)
-    delay (1000);
+    delay (2000);
 
     float voltage = (ax12GetRegister (1, AX_PRESENT_VOLTAGE, 1)) / 10.0;
     Serial.println ("== Stikklar Mk3 ==");
@@ -143,8 +143,10 @@ void setCenterOfGravityOffset(Commander &command){
     // can move upto move 125mm in each direction
     if((command.buttons&BUT_RT) == 0) {
         // move on the XY ground plane
-        gaitEngine.centerOfGravityOffset.x = -(int)command.lookV;
-        gaitEngine.centerOfGravityOffset.y = -(int)command.lookH;
+        // gaitEngine.centerOfGravityOffset.x = -(int)command.lookV;
+        gaitEngine.bodyPos.x = -(int)command.lookV;
+        // gaitEngine.centerOfGravityOffset.y = -(int)command.lookH;
+        gaitEngine.bodyPos.y = -(int)command.lookH;
         gaitEngine.centerOfGravityOffset.z = 0;
     } else {
         // move up or down
@@ -176,7 +178,7 @@ void setGaitMode(Commander &command) {
 
     } else if(command.buttons&BUT_R3) {
         gaitEngine.gaitSelect( RIPPLE_GEO );
-        speedMultiplier=0.5;
+        speedMultiplier=1;
 
     } else if(command.buttons&BUT_L4) { 
         gaitEngine.gaitSelect( AMBLE_SMOOTH );
@@ -216,8 +218,8 @@ void processCommands() {
         } else {
             setGaitMode(command);
             setWalkMovement(command);
-            // setCenterOfGravityOffset(command);
-            setBodyRotation(command);
+            setCenterOfGravityOffset(command);
+            //setBodyRotation(command);
         }
     } else if ( fsm.isInState(DrivingState) ) {
         if (command.buttons & BUT_L6) {

@@ -1,33 +1,8 @@
 #include "wheel_engine.h"
-//#include "config.h"
 
 WheelEngine::WheelEngine() {
-	// _servos[WE_RF_TURN] = RF_COXA;	// 1
-	// _servos[WE_LF_TURN] = LF_COXA;	// 9
-	// _servos[WE_LR_TURN] = LR_COXA;	// 13
-	// _servos[WE_RR_TURN] = RR_COXA;	// 5
-	// _servos[WE_RF_WHEEL] = RF_WHEEL;	// 4
-	// _servos[WE_LF_WHEEL] = LF_WHEEL;	// 12
-	// _servos[WE_LR_WHEEL] = LR_WHEEL;	// 16
-	// _servos[WE_RR_WHEEL] = RR_WHEEL;	// 8
-	// _signs[WE_RF_TURN] = RF_COXA_SIGN;
-	// _signs[WE_LF_TURN] = LF_COXA_SIGN;
-	// _signs[WE_LR_TURN] = LR_COXA_SIGN;
-	// _signs[WE_RR_TURN] = RR_COXA_SIGN;
-	// _signs[WE_RF_WHEEL] = RF_WHEEL_SIGN;
-	// _signs[WE_LF_WHEEL] = LF_WHEEL_SIGN;
-	// _signs[WE_LR_WHEEL] = LR_WHEEL_SIGN;
-	// _signs[WE_RR_WHEEL] = RR_WHEEL_SIGN;
-	// _neutral[WE_RF_TURN] = RF_COXA_WHEEL_NEUTRAL;
-	// _neutral[WE_LF_TURN] = LF_COXA_WHEEL_NEUTRAL;
-	// _neutral[WE_LR_TURN] = LR_COXA_WHEEL_NEUTRAL;
-	// _neutral[WE_RR_TURN] = RR_COXA_WHEEL_NEUTRAL;
 	// configure the bioloid interpolating servos
 	_controller.setup(4);
-	// _controller.setId(WE_RF_TURN, RF_COXA);
-	// _controller.setId(WE_LF_TURN, LF_COXA);
-	// _controller.setId(WE_LR_TURN, LR_COXA);
-	// _controller.setId(WE_RR_TURN, RR_COXA);
 
 	setupServoSet(WE_RF_TURN, WE_RF_WHEEL, RF_COXA, RF_WHEEL, RF_TURN_SIGN, RF_WHEEL_SIGN, RF_COXA_WHEEL_NEUTRAL);
 	setupServoSet(WE_LF_TURN, WE_LF_WHEEL, LF_COXA, LF_WHEEL, LF_TURN_SIGN, LF_WHEEL_SIGN, LF_COXA_WHEEL_NEUTRAL);
