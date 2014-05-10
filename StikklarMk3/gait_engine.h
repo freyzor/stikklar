@@ -11,10 +11,6 @@
 #define maxValue(n) maxs[n-1]
 #define minValue(n) mins[n-1]
 #define neutral(n) neutrals[n-1]
-
-#define DEFAULT_ENDPOINT_X 90  // front/back
-#define DEFAULT_ENDPOINT_Y 90  // right/left
-#define DEFAULT_ENDPOINT_Z 150 // down/up
  
 // ripple gate move one leg at the time
 #define RIPPLE                  0
@@ -69,7 +65,10 @@ private:
 
 	char  legJoints[4][3];
 
-	long gaitStartTime;
+	unsigned long gaitStartTime;	// the milli time when gait was started
+	float gaitCycleSignal;			// the position with in the step cycle
+	float deltaCycleSignal;   		// the delta time between current step and the last
+
 	int tranTime;
 	int cycleTimeMillis;
 	float cycleTime;
@@ -78,7 +77,7 @@ private:
 	int step;
 	int currentGait;
 	int gaitLegNo[LEG_COUNT];   // order to move legs in
-	float currentCycleOffset;
+
 	float gaitLegOffset[LEG_COUNT];
 	// relative to leg quadrant
 	ik_req_t gaits[LEG_COUNT];  // gait position
@@ -87,6 +86,11 @@ private:
 	int stepToStepCounter;
 	ik_req_t stepToVector;
 	long stepToMSec;
+	// COG - center of gravity
+	bool isCogCompensationEnabled;
+	float cogAmplitudeLR;
+	float cogAmplitudeFB;
+	float cogDampeningFactor;
 
 	// Gait methods
 	// implemented gait types methods
@@ -114,13 +118,9 @@ private:
 	ik_req_t (GaitEngine::*gaitGen)(char leg);
 	void (GaitEngine::*gaitSetup)();
 
-
-	// COG - center of gravity
-	bool isCogCompensationEnabled;
-	float amp_LeftRight;
-	float amp_FrontBack;
 	vec2 calculateDesiredCOG(float t);
 	vec2 calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b);
+	float updateCogDampening();
 
 	void setupGeoRippleGait();
 

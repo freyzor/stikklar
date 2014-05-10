@@ -1,6 +1,9 @@
 #ifndef _CONFIG_H_
 #define _CONFIG_H_
 
+#define AX_SENSOR 100
+
+
 // NUKE config
 #define LEG_COUNT   4
 
@@ -22,6 +25,15 @@
 #define L_COXA      68  // MM distance from coxa servo to femur servo
 #define L_FEMUR     82 // MM distance from femur servo to tibia servo
 #define L_TIBIA     166 // MM distance from tibia servo to foot
+
+#define DEFAULT_ENDPOINT_X 70  // front/back
+#define DEFAULT_ENDPOINT_Y 70  // right/left
+#define DEFAULT_ENDPOINT_Z 160 // down/up
+
+#define LEG_LIFT_HIGHT 60
+
+#define COG_DAMP_INCREASE_RATIO 0.125
+#define COG_DAMP_DECREASE_RATIO 0.3
 
 // Servo IDs
 #define RF_COXA 1
@@ -57,8 +69,6 @@
 #define LR_TIBIA_SIGN 	-1
 
 
-
-
 // Wheel Engine servo IDs
 #define RF_WHEEL 	4
 #define LF_WHEEL 	12
@@ -80,10 +90,10 @@
 #define WHEEL_X_LENGTH 		X_COXA * 2
 #define WHEEL_Y_LENGTH 		Y_COXA * 2
 
-#define RF_COXA_WHEEL_NEUTRAL 207	// 1
-#define LF_COXA_WHEEL_NEUTRAL 816	// 9
-#define LR_COXA_WHEEL_NEUTRAL 368	// 13
-#define RR_COXA_WHEEL_NEUTRAL 669	// 5
+#define RF_COXA_WHEEL_NEUTRAL 666	// 1
+#define LF_COXA_WHEEL_NEUTRAL 358	// 9
+#define LR_COXA_WHEEL_NEUTRAL 666	// 13
+#define RR_COXA_WHEEL_NEUTRAL 358	// 5
 
 
 

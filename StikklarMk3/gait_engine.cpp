@@ -16,21 +16,21 @@ const char* LEG_NAMES[] = {
 
 int mins[] = {
 	60, 162, 95, 0, 
-	60, 161, 95, 0, 
+	60, 162, 95, 0, 
 	60, 162, 95, 0, 
 	60, 162, 95, 0};
 
 int maxs[] = {
 	960, 850, 1005, 0, 
-	960, 852, 1005, 0, 
-	960, 864, 1005, 0, 
-	960, 840, 1005, 0};
+	960, 850, 1005, 0, 
+	960, 850, 1005, 0, 
+	960, 850, 1005, 0};
 
 int neutrals[] = {
-	364, 516, 754, 0, 
-	669, 494, 731, 0, 
-	669, 498, 748, 0, 
-	364, 506, 745, 0};
+	364, 512, 742, 0, 
+	669, 512, 742, 0, 
+	669, 512, 742, 0, 
+	364, 512, 742, 0};
 
 bool signs[] = {
 	true, true, false, false, 
@@ -148,7 +148,7 @@ void GaitEngine::setupIK(){
     );
 
     // default 33
-    liftHeight = 50; 
+    liftHeight = LEG_LIFT_HIGHT; 
     stepsInCycle = 1;
     step = 0;
 }
@@ -167,7 +167,6 @@ void GaitEngine::updateGaitAndFootPositions() {
 		gait = GaitGen(legId);
 	    // add the gate offset to the default endpoint
 	    currentFootPositions[legId] = addPoints(defaultFootPositions[legId], gait);
-	    //log(int(legId)); logvec(" gait", currentFootPositions[legId]);
 	}
 }
 
@@ -209,7 +208,7 @@ void GaitEngine::doIK() {
     updateGaitAndFootPositions();
     if (isCogCompensationEnabled) {
 	    // we simply override the wanted body pos and let the bodyIK figure it out
-	    bodyPos = calculateDesiredCOG(currentCycleOffset);
+	    bodyPos = calculateDesiredCOG(gaitCycleSignal);
 	}
     adjustFootPositionsByBodyFrame();
     solveAndUpdateLegJoints();
@@ -234,7 +233,9 @@ void GaitEngine::gaitSelect(int GaitType){
 	currentGait = GaitType;
 	tranTime = STD_TRANSITION;
 	cycleTime = 0;
+	cycleTimeMillis = 0;
 	isCogCompensationEnabled = false;
+
 	// reset the endpoints in case somebody messed with them
 	setDefaultFootPosition(
     	DEFAULT_ENDPOINT_X, 
@@ -293,6 +294,11 @@ void GaitEngine::gaitSelect(int GaitType){
 		cycleTime = cycleTimeMillis / 1000.0;
 	}
 	step = 0;
+
+	logval("cycleTime", cycleTime);
+	logval("pushSteps", pushSteps);
+	logval("stepsInCycle", stepsInCycle);
+	logval("tranTime", tranTime);
 }
 
 void GaitEngine::setupGeoRippleGait() {
@@ -310,8 +316,8 @@ void GaitEngine::setupGeoRippleGait() {
 	isCogCompensationEnabled = true;
 	tranTime = 65;
 
-	amp_LeftRight = 0.25;
-	amp_FrontBack = 0.2;
+	cogAmplitudeLR = 0.30;
+	cogAmplitudeFB = 0.15;
 }
 
 // this would immediately be followd by gaitSelect
@@ -371,16 +377,18 @@ ik_req_t GaitEngine::DefaultGaitGen(char leg){
 			gaits[leg].r = 0;
 	    }else if(((step == gaitLegNo[leg]+1) || (step == gaitLegNo[leg]-(stepsInCycle-1))) && (gaits[leg].z < 0)){
 			// leg down position                                           NOTE: dutyFactor = pushSteps/StepsInCycle
-			gaits[leg].x = (Xspeed*cycleTime*pushSteps)/(2*stepsInCycle);     // travel/Cycle = speed*cycleTime
-			gaits[leg].y = (Yspeed*cycleTime*pushSteps)/(2*stepsInCycle);     // Stride = travel/Cycle * dutyFactor
+			float stride = (cycleTime*pushSteps)/(2*stepsInCycle);
+			gaits[leg].x = Xspeed*stride;     // travel/Cycle = speed*cycleTime
+			gaits[leg].y = Yspeed*stride;     // Stride = travel/Cycle * dutyFactor
 			gaits[leg].z = 0;                                                 //   = speed*cycleTime*pushSteps/stepsInCycle
-			gaits[leg].r = (Rspeed*cycleTime*pushSteps)/(2*stepsInCycle);     //   we move Stride/2 here
+			gaits[leg].r = Rspeed*stride;     //   we move Stride/2 here
 	    }else{
 			// move body forward
-			gaits[leg].x = gaits[leg].x - (Xspeed*cycleTime)/stepsInCycle;    // note calculations for Stride above
-			gaits[leg].y = gaits[leg].y - (Yspeed*cycleTime)/stepsInCycle;    // we have to move Stride/pushSteps here
+			float stride = cycleTime/stepsInCycle;
+			gaits[leg].x = gaits[leg].x - (Xspeed*stride);    // note calculations for Stride above
+			gaits[leg].y = gaits[leg].y - (Yspeed*stride);    // we have to move Stride/pushSteps here
 			gaits[leg].z = 0;                                                 //   = speed*cycleTime*pushSteps/stepsInCycle*pushSteps
-			gaits[leg].r = gaits[leg].r - (Rspeed*cycleTime)/stepsInCycle;    //   = speed*cycleTime/stepsInCycle
+			gaits[leg].r = gaits[leg].r - (Rspeed*stride);    //   = speed*cycleTime/stepsInCycle
 		}
 	}else{ // stopped
 		gaits[leg].z = 0;
@@ -406,22 +414,25 @@ ik_req_t GaitEngine::SmoothGaitGen(char leg) {
 			gaits[leg].r = 0;
 		}else if((step == gaitLegNo[leg] + 2) && (gaits[leg].z < 0)){
 			// leg halfway down
-			gaits[leg].x = (Xspeed*cycleTime*pushSteps)/(4*stepsInCycle);
-			gaits[leg].y = (Yspeed*cycleTime*pushSteps)/(4*stepsInCycle);
+			float stride = (cycleTime*pushSteps)/(4*stepsInCycle);
+			gaits[leg].x = Xspeed*stride;
+			gaits[leg].y = Yspeed*stride;
 			gaits[leg].z = -liftHeight/2;
-			gaits[leg].r = (Rspeed*cycleTime*pushSteps)/(4*stepsInCycle);
+			gaits[leg].r = Rspeed*stride;
 		}else if((step == gaitLegNo[leg]+3) && (gaits[leg].z < 0)){
 			// leg down position                                           NOTE: dutyFactor = pushSteps/StepsInCycle
-			gaits[leg].x = (Xspeed*cycleTime*pushSteps)/(2*stepsInCycle);     // travel/Cycle = speed*cycleTime
-			gaits[leg].y = (Yspeed*cycleTime*pushSteps)/(2*stepsInCycle);     // Stride = travel/Cycle * dutyFactor
+			float stride = (cycleTime*pushSteps)/float(2*stepsInCycle);
+			gaits[leg].x = int(float(Xspeed)*stride);     // travel/Cycle = speed*cycleTime
+			gaits[leg].y = int(float(Yspeed)*stride);     // Stride = travel/Cycle * dutyFactor
 			gaits[leg].z = 0;                                                 //   = speed*cycleTime*pushSteps/stepsInCycle
-			gaits[leg].r = (Rspeed*cycleTime*pushSteps)/(2*stepsInCycle);     //   we move Stride/2 here
+			gaits[leg].r = Rspeed*stride;     //   we move Stride/2 here
 		}else{
 			// move body forward
-			gaits[leg].x = gaits[leg].x - (Xspeed*cycleTime)/stepsInCycle;    // note calculations for Stride above
-			gaits[leg].y = gaits[leg].y - (Yspeed*cycleTime)/stepsInCycle;    // we have to move Stride/pushSteps here
+			float stride = cycleTime/float(stepsInCycle);
+			gaits[leg].x = gaits[leg].x - int(float(Xspeed)*stride);    // note calculations for Stride above
+			gaits[leg].y = gaits[leg].y - int(float(Yspeed)*stride);    // we have to move Stride/pushSteps here
 			gaits[leg].z = 0;                                                 //   = speed*cycleTime*pushSteps/stepsInCycle*pushSteps
-			gaits[leg].r = gaits[leg].r - (Rspeed*cycleTime)/stepsInCycle;    //   = speed*cycleTime/stepsInCycle
+			gaits[leg].r = gaits[leg].r - Rspeed*stride;    //   = speed*cycleTime/stepsInCycle
 		}
 	}else{ // stopped
 		gaits[leg].z = 0;
@@ -443,7 +454,6 @@ ik_req_t GaitEngine::StepToGaitGen(char legId){
 			gaits[legId].y += yForLeg(legId, stepToVector.y);
 			gaits[legId].z = 0;                                               
 			gaits[legId].r = 0;
-			// log(legId); logvec(" leg", gaits[legId]);
 	    }else{
 	    	// stay put
 			gaits[legId].z = 0;
@@ -460,6 +470,20 @@ ik_req_t GaitEngine::StepToGaitGen(char legId){
 
 bool GaitEngine::isSteppingTo() {
 	return (currentGait == RIPPLE_STEP_TO && stepToStepCounter > 0);
+}
+
+float GaitEngine::updateCogDampening() {
+	if ( isMoving() ) {
+		cogDampeningFactor +=  (deltaCycleSignal / COG_DAMP_INCREASE_RATIO);
+		if (cogDampeningFactor > 1.0) {
+			cogDampeningFactor = 1.0;
+		};
+	} else {
+		cogDampeningFactor -=  (deltaCycleSignal / COG_DAMP_DECREASE_RATIO);
+		if (cogDampeningFactor < 0.0) {
+			cogDampeningFactor = 0.0;
+		};
+	}
 }
 
 vec2 GaitEngine::calculateDesiredCOG(float t) {
@@ -483,12 +507,14 @@ vec2 GaitEngine::calculateDesiredCOG(float t) {
 
 	// X_cog = X_c + a_lr*A_lr*sin(wt+(pi/2))+a_fb*A_fb*sin(2wt)
 	// w = 2*pi*f , f is not neede as it is aleady factored into t
+	// Bisector vectors
 	vec2 A_lr = calculateCogVector(cog, legpos[LEFT_FRONT], legpos[LEFT_REAR]);
 	vec2 A_fb = calculateCogVector(cog, legpos[LEFT_FRONT], legpos[RIGHT_FRONT]);
 
-	// precompute these factors
-	float m_lr = sin((M_2_PI*t) - M_PI_2) * amp_LeftRight;
-	float m_fb = sin(2*M_2_PI*t) * amp_FrontBack;
+	// compute cyclic bisector vector scale factors
+	// apply a dampening factor to smothe oscillation when not moving and taking off
+	float m_lr = cogAmplitudeLR * cogDampeningFactor * sin((M_2_PI*t) - M_PI_2);
+	float m_fb = cogAmplitudeFB * cogDampeningFactor * sin(2*M_2_PI*t);
 
 	vec2 out = -cog - ((A_lr*m_lr) - (A_fb*m_fb));
 
@@ -520,13 +546,13 @@ vec2 GaitEngine::calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b) {
 // Continouse gait generation
 ik_req_t GaitEngine::ContinuousGaitGen(char legId) {
 	if( isMoving() ) {
-		float t = currentCycleOffset - gaitLegOffset[legId];
+		float t = gaitCycleSignal - gaitLegOffset[legId];
 		// normalize to range [0, 1)
 		if (t < 0.0) { t += 1.0; }
 
 		if(t < 0.25)
 		{
-			// an sinodal s curve from 0 to 1
+			// a sinodal s curve from 0 to 1
 			float distance = (1 + cos(M_PI + t*M_PI*4)) * 0.5;
 			// relocate leg
 			gaits[legId].x = Xspeed * distance;
@@ -549,9 +575,18 @@ ik_req_t GaitEngine::ContinuousGaitGen(char legId) {
 }
 
 void GaitEngine::ContinuousGaitSetup() {
+	unsigned long currentStepTime = millis();
 	if (gaitStartTime == 0) {
-		gaitStartTime = millis();
+		gaitStartTime = currentStepTime;
 	}
-	int millisIntoCycle = (millis() - gaitStartTime) % cycleTimeMillis;
-	currentCycleOffset = millisIntoCycle / float(cycleTimeMillis);
+	// calculate the gait cycle signal [0,1)
+	unsigned int millisIntoCycle = (currentStepTime - gaitStartTime) % cycleTimeMillis;
+	float lastGaitCycleSignal = gaitCycleSignal;
+
+	gaitCycleSignal = millisIntoCycle / float(cycleTimeMillis);
+	// compute the frame delta for the cycle signal
+	deltaCycleSignal = gaitCycleSignal - lastGaitCycleSignal;
+	if (deltaCycleSignal < 0.0) { deltaCycleSignal += 1.0; }
+
+	updateCogDampening();
 }

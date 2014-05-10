@@ -60,7 +60,7 @@ void WheelEngine::update() {
 	//if our previous interpolation is complete, recompute the IK
 	if(_controller.interpolating == 0){
 		doUpdate();
-		_controller.interpolateSetup(98);
+		_controller.interpolateSetup(65);
 	}
 
 	// update joints
