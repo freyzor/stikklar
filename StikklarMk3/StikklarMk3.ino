@@ -19,14 +19,17 @@
 // stikklar
 #include "gait_engine.h"
 #include "wheel_engine.h"
+#include "turret_engine.h"
 #include "poses.h"
 #include "blackboard.h"
 #include "sensors.h"
 
 
 Commander command;
+BioloidController bioloidController;
 WheelEngine wheelEngine;
 GaitEngine gaitEngine;
+TurretEngine turretEngine;
 
 State DrivingState = State(enterDriving, updateDriving, noop);
 State WalkingState = State(enterWalking, updateWalking, noop);
@@ -35,27 +38,69 @@ State GotoDrivingState = State(enterGotoDrivingState, updateGotoDrivingState, no
 
 FSM fsm = FSM(WalkingState);
 
+void setupWalkMode() {
+    // setup the bioloid dynamixel config 
+    gaitEngine.setupContoller();
+    // extend the setup with the turret controllers
+    turretEngine.setupContoller();
+    // initialize the current servo positions
+    bioloidController.readPose();
+}
+
+void setupWheelMode() {
+    // need to setup the controller every time we enter the driving mode
+    wheelEngine.setupContoller();
+    // extend the setup with the turret controllers
+    turretEngine.setupContoller();
+    // initialize the current servo positions
+    bioloidController.readPose();
+}
+
+void updateGaitEngine() {
+    // if our previous interpolation is complete, recompute the IK
+    if(bioloidController.interpolating == 0) {
+        gaitEngine.update();
+        turretEngine.updateServos();
+        bioloidController.interpolateSetup(65);
+    }
+
+    // update joints
+    bioloidController.interpolateStep();
+}
+
+void updateWheelEngine() {
+    // if our previous interpolation is complete, recompute the IK
+    if(bioloidController.interpolating == 0) {
+        wheelEngine.update();
+        turretEngine.updateServos();
+        bioloidController.interpolateSetup(65);
+    }
+
+    // update joints
+    bioloidController.interpolateStep();
+}
+
 void noop() {}
 
 // ************ Driving Mode *************
 void enterDriving() {
     debug_msg("enter Driving State");
-    wheelEngine.readPose();
-    wheelEngine.writeWheelMode();
+    setupWheelMode();
 }
 
 void updateDriving() {
-    wheelEngine.update();
+    updateWheelEngine();
 }
 
 // ********** Walking Mode **************
 void enterWalking() {
     debug_msg("enter Walking State");
-    gaitEngine.gaitSelect(RIPPLE_SMOOTH);
+    setupWalkMode();
+    gaitEngine.gaitSelect(RIPPLE_GEO);
 }
 
 void updateWalking() {
-    gaitEngine.update();
+    updateGaitEngine();
 }
 
 void exitWalking() {
@@ -66,40 +111,46 @@ void exitWalking() {
 void enterGotoDrivingState() {
     debug_msg("enter Goto Driving State");
     // we pick the point right under the coxa axle, 3sec should give two walk cycles
-    gaitEngine.setStepToTarget(1, 1, DEFAULT_ENDPOINT_Z, 3000);
+    gaitEngine.setStepToTarget(30, 30, DEFAULT_ENDPOINT_Z, 4000);
     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
     debug_msg("driving goto set");
 }
 
 void updateGotoDrivingState() {
-    if ( !gaitEngine.isSteppingTo() ) {
+    if ( !gaitEngine.isContiouslySteppingTo() ) {
+        // TODO: cache the gaits so we can reset them when standing up
         debug_msg("Done stepping into drive position");
+        gaitEngine.cacheGaits();
         gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
         debug_msg("Driving stance achieved");
         fsm.transitionTo(DrivingState);
     } else {
-        gaitEngine.update();
+        updateGaitEngine();
     }
 }
 
 // ******* Goto Driving transision state **********
 void enterGotoWalkingState() {
     debug_msg("enter Goto Walking State");
-    gaitEngine.readPose();
+    setupWalkMode();
+    // enter an intermediate pose
+    // TODO: we could run a sequence to orchestrate this better
     gaitEngine.doPose(WHEEL_CRAB_MIDDLE, 2000);
     debug_msg("Driving crab stance achieved");
+    // TODO: set gaits to the cached version so we can resume from a sane pose
+    gaitEngine.restoreCachedGaits();
     // go to the default walking stance, 3sec should give two walk cycles
-    gaitEngine.setStepToTarget(DEFAULT_ENDPOINT_X, DEFAULT_ENDPOINT_Y, DEFAULT_ENDPOINT_Z, 3000);
+    gaitEngine.setStepToTarget(DEFAULT_ENDPOINT_X, DEFAULT_ENDPOINT_Y, DEFAULT_ENDPOINT_Z, 4000);
     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
     debug_msg("Walking goto set");
 }
 
 void updateGotoWalkingState() {
-    if ( !gaitEngine.isSteppingTo() ) {
+    if ( !gaitEngine.isContiouslySteppingTo() ) {
         debug_msg("Done stepping into default position");
         fsm.transitionTo(WalkingState);
     } else {
-        gaitEngine.update();
+        updateGaitEngine();
     }
 }
 
@@ -107,30 +158,30 @@ void updateGotoWalkingState() {
 // To go faster than 100mm/s, we can use this speedMultiplier
 int speedMultiplier;
 
-void setup(){
+void setup() {
     // set user LED as output
     pinMode(0, OUTPUT);
-    
+
+    // configure bioloid controller and engines
+    // the controller is set to hold all the servos
+    // individual engines will then limit and set up the active set of servos needed
+    bioloidController.setup(AX_SERVO_COUNT);
+    gaitEngine.setBioloidController(&bioloidController);
+    wheelEngine.setBioloidController(&bioloidController);
+    turretEngine.setBioloidController(&bioloidController);
+
+    // initialize the bioloid dynamixel bus communicationss
     ax12Init(1000000l);
-    // setup IK
-    gaitEngine.setupIK();
-    gaitEngine.gaitSelect(RIPPLE_SMOOTH);
+
+    delay(2000);
+
     // setup serial for usage with the Commander
     command.begin(38400);
   
     // wait, then check the voltage (LiPO safety)
-    delay (3000);
+    delay (1000);
 
-    // axReadServoInfo(1, blackboard);
-
-    // logval("volt", blackboard.voltage);
-    // logval("temp", blackboard.axTemperature[0]);
-    // logval("pos", blackboard.axPosition[0]);
-    // logval("speed", blackboard.axSpeed[0]);
-    // logval("err", int(blackboard.axError[0]));
-
-
-    float voltage = (ax12GetRegister (2, AX_PRESENT_VOLTAGE, 1)) / 10.0;
+    float voltage = (ax12GetRegister (AX_SENSOR, AX_PRESENT_VOLTAGE, 1)) / 10.0;
     Serial.println ("== Stikklar Mk3 ==");
     Serial.print ("System Voltage: ");
     Serial.print (voltage);
@@ -143,6 +194,12 @@ void setup(){
         while(1);
     }
 
+    PlayTone(AX_SENSOR, 30);
+
+    setupWalkMode();
+    turretEngine.updateServos();
+    gaitEngine.setupIK();
+    gaitEngine.gaitSelect(RIPPLE_GEO);
     gaitEngine.readPose();
     gaitEngine.slowStart(2000);
 
@@ -184,8 +241,8 @@ void setWalkMovement(Commander &command){
         gaitEngine.Yspeed = int(speedMultiplier*command.walkH);
         gaitEngine.Rspeed = 0.0;
     } else {
-        gaitEngine.Rspeed = -float(speedMultiplier*command.walkH)/250.0;
         gaitEngine.Yspeed = 0;
+        gaitEngine.Rspeed = -float(speedMultiplier*command.walkH)/250.0;
     }
 }
 
@@ -216,7 +273,14 @@ void setWheelMovement(Commander &command) {
     // max 1024 => speed 125*8 => 500
     wheelEngine.speed = command.walkV * 8;
     // max steer angle => 154, 125
-    wheelEngine.steering = int(command.lookH * 1.2);
+    wheelEngine.steering = int((command.walkH * 0.88) + 0.5);
+}
+
+void setTurretMovement(Commander &command) {
+    // pan (-150, 150) degrees
+    turretEngine.pan = int((command.lookH * 1.2) + 0.5);
+    // tilt (-90, 90) degrees
+    turretEngine.tilt = int((command.lookV * 0.72) + 0.5);
 }
 
 void processCommands() {
@@ -235,7 +299,8 @@ void processCommands() {
             setGaitMode(command);
             setWalkMovement(command);
             //setCenterOfGravityOffset(command);
-            setBodyRotation(command);
+            //setBodyRotation(command);
+            setTurretMovement(command);
         }
     } else if ( fsm.isInState(DrivingState) ) {
         if (command.buttons & BUT_L6) {
@@ -243,6 +308,7 @@ void processCommands() {
             fsm.transitionTo(GotoWalkingState);
         } else {
             setWheelMovement(command);
+            setTurretMovement(command);
         }
     }
 }
@@ -256,9 +322,9 @@ void processSensors(){
     logval("IR Top", ax12GetRegister(AX_SENSOR, AX_RIGHT_IR_DATA, 1));
     logval("IR Front", ax12GetRegister(AX_SENSOR, AX_CENTER_IR_DATA, 1));
     logval("IR Bottom", ax12GetRegister(AX_SENSOR, AX_LEFT_IR_DATA, 1));
-    // logval("Lum Top", ax12GetRegister(AX_SENSOR, 31, 1));
-    // logval("Lum Front", ax12GetRegister(AX_SENSOR, 30, 1));
-    // logval("Lum Bottom", ax12GetRegister(AX_SENSOR, 29, 1));
+    // logval("Lum Top", ax12GetRegister(AX_SENSOR, AX_RIGHT_LUMINOSITY, 1));
+    // logval("Lum Front", ax12GetRegister(AX_SENSOR, AX_CENTER_LUMINOSITY, 1));
+    // logval("Lum Bottom", ax12GetRegister(AX_SENSOR, AX_LEFT_LUMINOSITY, 1));
 
     //PlayTone(AX_SENSOR, 40);
 
@@ -272,6 +338,7 @@ void loop(){
     //processSensors();
 
     fsm.update();
+    turretEngine.updateServos();
 }
 
 int ax12Ping(int id){

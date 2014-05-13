@@ -3,6 +3,7 @@
 
 #define AX_SENSOR 100
 
+#define AX_SERVO_COUNT	18
 
 // NUKE config
 #define LEG_COUNT   4
@@ -33,7 +34,7 @@
 #define LEG_LIFT_HIGHT 60
 
 #define COG_DAMP_INCREASE_RATIO 0.125
-#define COG_DAMP_DECREASE_RATIO 0.3
+#define COG_DAMP_DECREASE_RATIO 0.25
 
 // Servo IDs
 #define RF_COXA 1
@@ -87,7 +88,7 @@
 
 #define MIN_ANGLE_DEG		0.29296875
 #define MIN_ANGLE_RAD		0.005113269292
-#define WHEEL_X_LENGTH 		X_COXA * 2
+#define WHEEL_X_LENGTH 		X_COXA
 #define WHEEL_Y_LENGTH 		Y_COXA * 2
 
 #define RF_COXA_WHEEL_NEUTRAL 666	// 1
@@ -95,7 +96,8 @@
 #define LR_COXA_WHEEL_NEUTRAL 666	// 13
 #define RR_COXA_WHEEL_NEUTRAL 358	// 5
 
-
+#define PAN_SERVO_ID	17
+#define TILT_SERVO_ID	18
 
 #define log(x) Serial.print(x)
 #define logln(x) Serial.println(x)

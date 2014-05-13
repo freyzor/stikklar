@@ -24,7 +24,9 @@
 // The quadrants is always RF, lf, lr, rr going CCW from RF
 class WheelEngine {
 public:
-	WheelEngine();
+	WheelEngine() {};
+    void setupContoller();
+    void setBioloidController(BioloidController* bioloidController);
     void update();
     void readPose();
     void writeWheelMode();
@@ -34,16 +36,12 @@ private:
 	void doUpdate();
     void updateServos(int r_angle, int l_angle, int rf_speed, int lf_speed, int lr_speed, int rr_speed);
     void writeWheelSpeed(int rf_speed, int lf_speed, int lr_speed, int rr_speed);
-    void setupServoSet(
-        int turnIndex, int wheelIndex, 
-        int turnId, int wheelId, 
-        char turnSign, char wheelSign,
-        int neutralValue);
+
     unsigned int convertSpeedToAX(int speed) ;
-	BioloidController _controller;
-	int _servos[8];
-	char _signs[8];
-	int _neutral[4]; // we only need the turn wheel neutral values
+	BioloidController* controller;
+	static const unsigned char servoIds[8];
+	static const char servoSigns[8];
+	static const int servoNeutral[4]; // we only need the turn wheel neutral values
 };
 
 

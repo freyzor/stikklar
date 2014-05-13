@@ -31,20 +31,19 @@
 class GaitEngine {
 public:
 	GaitEngine();
+	void setupContoller();
+	void setBioloidController(BioloidController* bioloidController);
     void update();
     void readPose();
     void slowStart(long msec);
-    void doPose(const unsigned int * addr, long msec);
+    void doPose(const unsigned int* addr, long msec);
     void setupIK();
 	void gaitSelect(int GaitType);
 	void setStepToTarget(int x, int y, int z, long msec);
 	bool isSteppingTo();
-
-	// float bodyRotX;    // body roll
-	// float bodyRotY;    // body pitch
-	// float bodyRotZ;    // body rotation
-	// int bodyPosX;
-	// int bodyPosY;
+	bool isContiouslySteppingTo();
+	void cacheGaits();
+	void restoreCachedGaits();
 
     //Parameters for manipulating body position 
 	vec3 bodyRot;
@@ -57,11 +56,13 @@ public:
 	// bodyPos already does x,y of this it seems
 	ik_req_t centerOfGravityOffset;
 private:
-	BioloidController _controller;
+	BioloidController* controller;
 	// offset from leg joint relative to body
 	ik_req_t defaultFootPositions[LEG_COUNT];
 	// offset from leg joint relative to body
 	ik_req_t currentFootPositions[LEG_COUNT];
+	// temporary gait variables, used by step to as a reference point
+	ik_req_t tempGaits[LEG_COUNT];  // cached gait positions
 
 	char  legJoints[4][3];
 
@@ -80,11 +81,14 @@ private:
 
 	float gaitLegOffset[LEG_COUNT];
 	// relative to leg quadrant
-	ik_req_t gaits[LEG_COUNT];  // gait position
+	ik_req_t gaits[LEG_COUNT];  // gait positions
+	ik_req_t cachedGaits[LEG_COUNT];  // cached gait positions
+
 	int pushSteps;
 	ik_req_t nextEndPoint;
 	int stepToStepCounter;
 	ik_req_t stepToVector;
+	vec2 stepToVectors[LEG_COUNT];
 	long stepToMSec;
 	// COG - center of gravity
 	bool isCogCompensationEnabled;
@@ -103,7 +107,9 @@ private:
 	ik_req_t ContinuousGaitGen(char leg);
 	void ContinuousGaitSetup();
 
-	// void doLegIK(int legId, int coxaId, int femurId, int tibiaId);
+	ik_req_t ContinuousStepToGaitGen(char legId);
+	void setupContinousStepToGait();
+
 	void doIK();
 	// setup the starting positions of the legs.
 	void setDefaultFootPosition(int x, int y, int z);

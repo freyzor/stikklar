@@ -5,6 +5,7 @@
 #include <ax12.h>
 
 #define M_2_PI M_PI*2
+#define M_4_PI M_PI*4
 #define M_PI_2 M_PI/2
 
 const char* LEG_NAMES[] = {
@@ -14,25 +15,25 @@ const char* LEG_NAMES[] = {
 	"Right Rear" 
 };
 
-int mins[] = {
+const int mins[] = {
 	60, 162, 95, 0, 
 	60, 162, 95, 0, 
 	60, 162, 95, 0, 
 	60, 162, 95, 0};
 
-int maxs[] = {
+const int maxs[] = {
 	960, 850, 1005, 0, 
 	960, 850, 1005, 0, 
 	960, 850, 1005, 0, 
 	960, 850, 1005, 0};
 
-int neutrals[] = {
+const int neutrals[] = {
 	364, 512, 742, 0, 
 	669, 512, 742, 0, 
 	669, 512, 742, 0, 
 	364, 512, 742, 0};
 
-bool signs[] = {
+const bool signs[] = {
 	true, true, false, false, 
 	false, true, false, false, 
 	false, true, false, true, 
@@ -47,21 +48,33 @@ int signedValue(int n, int val) {
 }
 
 GaitEngine::GaitEngine() {
-	// configuring the bioloid interpolation controller
-	_controller.setup(12);
-	_controller.setId(0, RF_COXA);		// 1
-	_controller.setId(1, RF_FEMUR);		// 2
-	_controller.setId(2, RF_TIBIA);		// 3
-	_controller.setId(3, RR_COXA);		// 5
-	_controller.setId(4, RR_FEMUR);		// 6
-	_controller.setId(5, RR_TIBIA);		// 7
-	_controller.setId(6, LF_COXA);		// 9
-	_controller.setId(7, LF_FEMUR);		// 10
-	_controller.setId(8, LF_TIBIA);		// 11
-	_controller.setId(9, LR_COXA);		// 13
-	_controller.setId(10, LR_FEMUR);	// 14
-	_controller.setId(11, LR_TIBIA);	// 15
+	gaitGen = &GaitEngine::DefaultGaitGen;
+	gaitSetup = &GaitEngine::DefaultGaitSetup;
 
+	currentGait = -1;
+}
+
+void GaitEngine::setBioloidController(BioloidController* bioloidController) {
+	controller = bioloidController;
+}
+
+void GaitEngine::setupContoller() {
+	// configuring the bioloid interpolation controller
+	controller->poseSize = 12;
+	controller->setId(0, RF_COXA);		// 1
+	controller->setId(1, RF_FEMUR);		// 2
+	controller->setId(2, RF_TIBIA);		// 3
+	controller->setId(3, RR_COXA);		// 5
+	controller->setId(4, RR_FEMUR);		// 6
+	controller->setId(5, RR_TIBIA);		// 7
+	controller->setId(6, LF_COXA);		// 9
+	controller->setId(7, LF_FEMUR);		// 10
+	controller->setId(8, LF_TIBIA);		// 11
+	controller->setId(9, LR_COXA);		// 13
+	controller->setId(10, LR_FEMUR);	// 14
+	controller->setId(11, LR_TIBIA);	// 15
+
+	// TODO: this can be setup as a static [4][3] array
 	legJoints[RIGHT_FRONT][0] = RF_COXA;
 	legJoints[RIGHT_FRONT][1] = RF_FEMUR;
 	legJoints[RIGHT_FRONT][2] = RF_TIBIA;
@@ -75,12 +88,9 @@ GaitEngine::GaitEngine() {
 	legJoints[RIGHT_REAR][1] = RR_FEMUR;
 	legJoints[RIGHT_REAR][2] = RR_TIBIA;
 
-	gaitGen = &GaitEngine::DefaultGaitGen;
-	gaitSetup = &GaitEngine::DefaultGaitSetup;
-
+	// reset any body offset
 	bodyPos.x = 0;
 	bodyPos.y = 0;
-	currentGait = -1;
 }
 
 void GaitEngine::setDefaultFootPosition(int x, int y, int z){
@@ -102,34 +112,34 @@ void GaitEngine::setDefaultFootPosition(int x, int y, int z){
 }
 
 void GaitEngine::readPose() {
-	_controller.readPose();
+	controller->readPose();
 }
 
 void GaitEngine::update() {
 	// if our previous interpolation is complete, recompute the IK
-	if(_controller.interpolating == 0){
+	// if(controller->interpolating == 0){
 		doIK();
-		_controller.interpolateSetup(tranTime);
-	}
+	// 	controller->interpolateSetup(tranTime);
+	// }
 
-	// update joints
-	_controller.interpolateStep();	
+	// // update joints
+	// controller->interpolateStep();
 }
 
 void GaitEngine::slowStart(long msec) {
     doIK();
-    _controller.interpolateSetup(msec);
-    while(_controller.interpolating > 0) {
-        _controller.interpolateStep();
+    controller->interpolateSetup(msec);
+    while(controller->interpolating > 0) {
+        controller->interpolateStep();
         delay(3);
     }	
 }
 
 void GaitEngine::doPose(const unsigned int * addr, long msec) {
-    _controller.loadPose(addr);
-    _controller.interpolateSetup(msec);
-    while(_controller.interpolating > 0) {
-        _controller.interpolateStep();
+    controller->loadPose(addr);
+    controller->interpolateSetup(msec);
+    while(controller->interpolating > 0) {
+        controller->interpolateStep();
         delay(3);
     }	
 }
@@ -156,7 +166,7 @@ void GaitEngine::setupIK(){
 void GaitEngine::setJointValue(char legId, char jointId, int rawValue){
     int servo = neutral(jointId) + signedValue(jointId, rawValue);
     if(servo < maxValue(jointId) && servo > minValue(jointId))
-        _controller.setNextPose(jointId, servo);
+        controller->setNextPose(jointId, servo);
     else
         printServoError(legId, jointId, servo);
 }
@@ -181,7 +191,6 @@ void GaitEngine::adjustFootPositionsByBodyFrame() {
 		ik_req_t correction = bodyIK(bodyRot, bodyPos, footPosition, offset);
 	    // add rotation correction to the foot pos to get the new positon
 	    currentFootPositions[legId] = addPoints(footPosition, correction);
-	    //log(int(legId)); logvec(" body", currentFootPositions[legId]);
 	}
 }
 
@@ -192,7 +201,7 @@ void GaitEngine::solveAndUpdateLegJoints() {
 		footPosition = currentFootPositions[legId];
 		// Translate endpoint to leg space for for IK solving
 	    adjustEndpointForLeg(legId, footPosition);
-	    //log(int(legId)); logvec(" ik", footPosition);
+
 	    // solve the IK
 	    legSolution = legIK(footPosition);
 
@@ -284,7 +293,7 @@ void GaitEngine::gaitSelect(int GaitType){
 		stepsInCycle = 8;
 		tranTime = 65;
 	} else if(GaitType == RIPPLE_STEP_TO){
-		setupStepToGait();
+		setupContinousStepToGait();
 	} else if(GaitType == RIPPLE_GEO){
 		setupGeoRippleGait();
 	}
@@ -294,11 +303,6 @@ void GaitEngine::gaitSelect(int GaitType){
 		cycleTime = cycleTimeMillis / 1000.0;
 	}
 	step = 0;
-
-	logval("cycleTime", cycleTime);
-	logval("pushSteps", pushSteps);
-	logval("stepsInCycle", stepsInCycle);
-	logval("tranTime", tranTime);
 }
 
 void GaitEngine::setupGeoRippleGait() {
@@ -343,16 +347,6 @@ void GaitEngine::setupStepToGait() {
 		gaits[legId].z = 0;
 	}
 	setDefaultFootPosition(nextEndPoint.x, nextEndPoint.y, nextEndPoint.z);
-}
-
-// this would immediately be followd by gaitSelect
-void GaitEngine::setStepToTarget(int x, int y, int z, long msec) {
-	nextEndPoint.x = x;
-	nextEndPoint.y = y;
-	nextEndPoint.z = z;
-	stepToMSec = msec;
-	// reset the gait in case we retrigger the same, which is fine with new params
-	currentGait = -1;
 }
 
 bool GaitEngine::isMoving() {
@@ -472,8 +466,9 @@ bool GaitEngine::isSteppingTo() {
 	return (currentGait == RIPPLE_STEP_TO && stepToStepCounter > 0);
 }
 
+
 float GaitEngine::updateCogDampening() {
-	if ( isMoving() ) {
+	if ( isMoving() || isContiouslySteppingTo() ) {
 		cogDampeningFactor +=  (deltaCycleSignal / COG_DAMP_INCREASE_RATIO);
 		if (cogDampeningFactor > 1.0) {
 			cogDampeningFactor = 1.0;
@@ -552,12 +547,13 @@ ik_req_t GaitEngine::ContinuousGaitGen(char legId) {
 
 		if(t < 0.25)
 		{
+			float t4pi = t*M_4_PI;
 			// a sinodal s curve from 0 to 1
-			float distance = (1 + cos(M_PI + t*M_PI*4)) * 0.5;
+			float distance = (1 + cos(M_PI + t4pi)) * 0.5;
 			// relocate leg
 			gaits[legId].x = Xspeed * distance;
 			gaits[legId].y = Yspeed * distance;
-			gaits[legId].z = -liftHeight * sin(t*M_PI*4);
+			gaits[legId].z = -liftHeight * sin(t4pi);
 			gaits[legId].r = Rspeed * distance;
 		} else {
 			// move body forward
@@ -589,4 +585,97 @@ void GaitEngine::ContinuousGaitSetup() {
 	if (deltaCycleSignal < 0.0) { deltaCycleSignal += 1.0; }
 
 	updateCogDampening();
+}
+
+// this would immediately be followd by gaitSelect
+void GaitEngine::setStepToTarget(int x, int y, int z, long msec) {
+	nextEndPoint.x = x;
+	nextEndPoint.y = y;
+	nextEndPoint.z = z;
+	stepToMSec = msec;
+	// reset the gait in case we retrigger the same, which is fine with new params
+	currentGait = -1;
+}
+
+bool GaitEngine::isContiouslySteppingTo() {
+	// this can never be valid if the wrong gait is selected
+	if (currentGait != RIPPLE_STEP_TO) return false;
+
+	// first cycle where work takes place is still running
+	if ((millis() - gaitStartTime) < stepToMSec) return true;
+
+	// make sure all legs have landed before giving the GO
+	for (char legId=0; legId < LEG_COUNT; legId++) {
+		if (gaits[legId].z != 0) return true;
+	}
+
+	return false;
+}
+
+void GaitEngine::setupContinousStepToGait() {
+	// set up a single cycle to get us to where we want to be
+	gaitGen = &GaitEngine::ContinuousStepToGaitGen;
+	gaitSetup = &GaitEngine::ContinuousGaitSetup;
+
+	gaitLegOffset[LEFT_FRONT] = 0.0;
+	gaitLegOffset[RIGHT_REAR] = 0.25;
+	gaitLegOffset[RIGHT_FRONT] = 0.5;
+	gaitLegOffset[LEFT_REAR] = 0.75;
+
+	cycleTime = stepToMSec / 1000.0;
+	cycleTimeMillis = stepToMSec;
+	gaitStartTime = millis();
+
+	isCogCompensationEnabled = true;
+	tranTime = 65;
+
+	cogAmplitudeLR = 0.15;
+	cogAmplitudeFB = 0.15;
+
+	for (char legId=0; legId < LEG_COUNT; legId++) {
+		stepToVectors[legId].x = xForLeg(legId, nextEndPoint.x) - currentFootPositions[legId].x;
+		stepToVectors[legId].y = yForLeg(legId, nextEndPoint.y) - currentFootPositions[legId].y;
+		tempGaits[legId] = gaits[legId];
+	}
+}
+
+// Continouse gait generation
+ik_req_t GaitEngine::ContinuousStepToGaitGen(char legId) {
+	if( (millis() - gaitStartTime) < stepToMSec ) {
+		// we will only enter here the first cycle
+		float t = gaitCycleSignal - gaitLegOffset[legId];
+
+		if (t < 0.0) {
+			gaits[legId].z = 0;
+		} else if (t < 0.25) {
+			float t4pi = t*M_4_PI;
+			// a sinodal s curve from 1 to 0
+			float distance = (1 + cos(M_PI + t4pi)) * 0.5;
+			// relocate leg
+			gaits[legId].x = tempGaits[legId].x + stepToVectors[legId].x * distance;
+			gaits[legId].y = tempGaits[legId].y + stepToVectors[legId].y * distance;
+			gaits[legId].z = -liftHeight * sin(t4pi);
+			gaits[legId].r = 0;
+		} else {
+			// after the leg relcation we just need to keep the leg down
+			gaits[legId].x = tempGaits[legId].x + stepToVectors[legId].x;
+			gaits[legId].y = tempGaits[legId].y + stepToVectors[legId].y;
+			gaits[legId].z = 0;
+		}
+	} else { // stopped
+		gaits[legId].z = 0;
+	}
+	return gaits[legId];
+}
+
+void GaitEngine::cacheGaits() {
+	for (char legId=0; legId < LEG_COUNT; legId++) {
+		cachedGaits[legId] = gaits[legId];
+	}
+}
+
+void GaitEngine::restoreCachedGaits() {
+	for (char legId=0; legId < LEG_COUNT; legId++) {
+		gaits[legId] = cachedGaits[legId];
+	}
 }
