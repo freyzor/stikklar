@@ -2,29 +2,33 @@
 #define BLACKBOARD_H
 
 #include <Arduino.h>
-
-#define NUM_DYNAMIXEL_SERVOS 18
+#include "config.h"
 
 class BlackBoard {
 public:
-	// IR sensors
-	unsigned char topIrDistance;
-	unsigned char centerIrDistance;
-	unsigned char bottomIrDistance;
+	// IR sensor intensity
+	unsigned char topIrIntensity;
+	unsigned char centerIrIntensity;
+	unsigned char bottomIrIntensity;
 
 	// ax voltage
 	unsigned char voltage;
 
 	// ax status
-	int axSpeed[NUM_DYNAMIXEL_SERVOS];
-	int axPosition[NUM_DYNAMIXEL_SERVOS];
-	int axLoad[NUM_DYNAMIXEL_SERVOS];
-	unsigned char axTemperature[NUM_DYNAMIXEL_SERVOS];
-	unsigned char axError[NUM_DYNAMIXEL_SERVOS];
+	int axSpeed[AX_SERVO_COUNT];
+	int axPosition[AX_SERVO_COUNT];
+	int axLoad[AX_SERVO_COUNT];
+	unsigned char axTemperature[AX_SERVO_COUNT];
+	unsigned char axError[AX_SERVO_COUNT];
 
 	// wheel command
 	int steering;
 	int drivingSpeed;
+
+	// IMU
+	float yaw;
+	float pitch;
+	float roll;
 };
 
 extern volatile BlackBoard blackboard;

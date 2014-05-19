@@ -99,6 +99,9 @@
 #define PAN_SERVO_ID	17
 #define TILT_SERVO_ID	18
 
+#define MAX_GAIT_STRIDE  150
+#define MAX_GAIT_ROTATION 0.5
+
 #define log(x) Serial.print(x)
 #define logln(x) Serial.println(x)
 #define logvec(n, v) log(n); log(": ("); log(v.x); log(", "); log(v.y); log(", "); log(v.z); logln(")");
@@ -110,8 +113,10 @@
 #define dlogvec2(v) log(","); log(v.x); log(","); log(v.y);
 #define dlog(d) log(","); log(d);
 
+//#define DEBUG
+
 #ifdef DEBUG
-	#define debug_msg(msg) log(millis()); logln(msg);
+	#define debug_msg(msg) log(millis()); log(": "); logln(msg);
 #else
 	#define debug_msg(msg)
 #endif

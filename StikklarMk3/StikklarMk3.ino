@@ -7,6 +7,10 @@
 
 // 3d party Arduino libraries
 #include <FiniteStateMachine.h>
+#include <L3G.h>
+#include <LSM303.h>
+#include <ProfileTimer.h>
+#include <looper.h>
 
 // Arbotix libraries
 #include <ax12.h>
@@ -23,20 +27,18 @@
 #include "poses.h"
 #include "blackboard.h"
 #include "sensors.h"
+#include "minimu_ahrs.h"
+#include "tones.h"
 
+#define MIN_VOLTAGE 10.0
 
 Commander command;
 BioloidController bioloidController;
 WheelEngine wheelEngine;
 GaitEngine gaitEngine;
 TurretEngine turretEngine;
-
-State DrivingState = State(enterDriving, updateDriving, noop);
-State WalkingState = State(enterWalking, updateWalking, noop);
-State GotoWalkingState = State(enterGotoWalkingState, updateGotoWalkingState, noop);
-State GotoDrivingState = State(enterGotoDrivingState, updateGotoDrivingState, noop);
-
-FSM fsm = FSM(WalkingState);
+MinIMU_AHRS imu;
+looper scheduler;
 
 void setupWalkMode() {
     // setup the bioloid dynamixel config 
@@ -57,28 +59,37 @@ void setupWheelMode() {
 }
 
 void updateGaitEngine() {
+    // update joints
+    bioloidController.interpolateStep();
+
     // if our previous interpolation is complete, recompute the IK
     if(bioloidController.interpolating == 0) {
         gaitEngine.update();
         turretEngine.updateServos();
-        bioloidController.interpolateSetup(65);
+        bioloidController.interpolateSetup(STD_TRANSITION);
     }
-
-    // update joints
-    bioloidController.interpolateStep();
 }
 
 void updateWheelEngine() {
+    // update joints
+    bioloidController.interpolateStep();
+
     // if our previous interpolation is complete, recompute the IK
     if(bioloidController.interpolating == 0) {
         wheelEngine.update();
         turretEngine.updateServos();
-        bioloidController.interpolateSetup(65);
-    }
-
-    // update joints
-    bioloidController.interpolateStep();
+        bioloidController.interpolateSetup(STD_TRANSITION);
+    }    
 }
+
+// *********** Finite State Machine ************
+// for transisions between Walking and Driving
+State DrivingState = State(enterDriving, noop, exitDriving);
+State WalkingState = State(enterWalking, noop, exitWalking);
+State GotoWalkingState = State(enterGotoWalkingState, updateGotoWalkingState, noop);
+State GotoDrivingState = State(enterGotoDrivingState, updateGotoDrivingState, noop);
+
+FSM fsm = FSM(WalkingState);
 
 void noop() {}
 
@@ -86,10 +97,12 @@ void noop() {}
 void enterDriving() {
     debug_msg("enter Driving State");
     setupWheelMode();
+    scheduler.addJob(updateWheelEngine, BIOLOID_FRAME_LENGTH);
 }
 
-void updateDriving() {
-    updateWheelEngine();
+void exitDriving() {
+    debug_msg("exit Driving State");
+    scheduler.removeJob(updateWheelEngine);
 }
 
 // ********** Walking Mode **************
@@ -97,14 +110,12 @@ void enterWalking() {
     debug_msg("enter Walking State");
     setupWalkMode();
     gaitEngine.gaitSelect(RIPPLE_GEO);
-}
-
-void updateWalking() {
-    updateGaitEngine();
+    scheduler.addJob(updateGaitEngine, BIOLOID_FRAME_LENGTH);
 }
 
 void exitWalking() {
-    debug_msg("exit Driving State");
+    debug_msg("exit Walking State");
+    scheduler.removeJob(updateGaitEngine);
 }
 
 // ******* Goto Driving transision state **********
@@ -113,20 +124,19 @@ void enterGotoDrivingState() {
     // we pick the point right under the coxa axle, 3sec should give two walk cycles
     gaitEngine.setStepToTarget(30, 30, DEFAULT_ENDPOINT_Z, 4000);
     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
+    scheduler.addJob(updateGaitEngine, BIOLOID_FRAME_LENGTH);
     debug_msg("driving goto set");
 }
 
 void updateGotoDrivingState() {
-    if ( !gaitEngine.isContiouslySteppingTo() ) {
-        // TODO: cache the gaits so we can reset them when standing up
-        debug_msg("Done stepping into drive position");
-        gaitEngine.cacheGaits();
-        gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
-        debug_msg("Driving stance achieved");
-        fsm.transitionTo(DrivingState);
-    } else {
-        updateGaitEngine();
-    }
+    if (gaitEngine.isContiouslySteppingTo()) return;
+
+    scheduler.removeJob(updateGaitEngine);
+    debug_msg("Done stepping into drive position");
+    gaitEngine.cacheGaits();
+    gaitEngine.doPose(WHEEL_MODE_MIDDLE, 2000);
+    debug_msg("Driving stance achieved");
+    fsm.transitionTo(DrivingState);
 }
 
 // ******* Goto Driving transision state **********
@@ -137,75 +147,24 @@ void enterGotoWalkingState() {
     // TODO: we could run a sequence to orchestrate this better
     gaitEngine.doPose(WHEEL_CRAB_MIDDLE, 2000);
     debug_msg("Driving crab stance achieved");
-    // TODO: set gaits to the cached version so we can resume from a sane pose
+
     gaitEngine.restoreCachedGaits();
     // go to the default walking stance, 3sec should give two walk cycles
     gaitEngine.setStepToTarget(DEFAULT_ENDPOINT_X, DEFAULT_ENDPOINT_Y, DEFAULT_ENDPOINT_Z, 4000);
     gaitEngine.gaitSelect(RIPPLE_STEP_TO);
+    scheduler.addJob(updateGaitEngine, BIOLOID_FRAME_LENGTH);
     debug_msg("Walking goto set");
 }
 
 void updateGotoWalkingState() {
-    if ( !gaitEngine.isContiouslySteppingTo() ) {
-        debug_msg("Done stepping into default position");
-        fsm.transitionTo(WalkingState);
-    } else {
-        updateGaitEngine();
-    }
+    if (gaitEngine.isContiouslySteppingTo()) return;
+
+    scheduler.removeJob(updateGaitEngine);
+    debug_msg("Done stepping into default position");
+    fsm.transitionTo(WalkingState);
 }
 
-// The Commander protocol has values of -100 to 100, x/y/z speed are in mm/s
-// To go faster than 100mm/s, we can use this speedMultiplier
-int speedMultiplier;
-
-void setup() {
-    // set user LED as output
-    pinMode(0, OUTPUT);
-
-    // configure bioloid controller and engines
-    // the controller is set to hold all the servos
-    // individual engines will then limit and set up the active set of servos needed
-    bioloidController.setup(AX_SERVO_COUNT);
-    gaitEngine.setBioloidController(&bioloidController);
-    wheelEngine.setBioloidController(&bioloidController);
-    turretEngine.setBioloidController(&bioloidController);
-
-    // initialize the bioloid dynamixel bus communicationss
-    ax12Init(1000000l);
-
-    delay(2000);
-
-    // setup serial for usage with the Commander
-    command.begin(38400);
-  
-    // wait, then check the voltage (LiPO safety)
-    delay (1000);
-
-    float voltage = (ax12GetRegister (AX_SENSOR, AX_PRESENT_VOLTAGE, 1)) / 10.0;
-    Serial.println ("== Stikklar Mk3 ==");
-    Serial.print ("System Voltage: ");
-    Serial.print (voltage);
-    Serial.println (" volts.");
-    if (voltage < 10.0){
-        Serial.println ("WARNING: voltage to low entering eternal sleep!");
-        PlayTone(AX_SENSOR, 7);
-        delay(500);
-        PlayTone(AX_SENSOR, 3);
-        while(1);
-    }
-
-    PlayTone(AX_SENSOR, 30);
-
-    setupWalkMode();
-    turretEngine.updateServos();
-    gaitEngine.setupIK();
-    gaitEngine.gaitSelect(RIPPLE_GEO);
-    gaitEngine.readPose();
-    gaitEngine.slowStart(2000);
-
-    speedMultiplier = 1;
-}
-
+// *************** Commander Input processing ***********
 void setBodyRotation(Commander &command){
     gaitEngine.bodyRot.y = (((float)command.lookV))/250.0;
     if((command.buttons&BUT_RT) > 0) {
@@ -222,9 +181,7 @@ void setCenterOfGravityOffset(Commander &command){
     // can move upto move 125mm in each direction
     if((command.buttons&BUT_RT) == 0) {
         // move on the XY ground plane
-        // gaitEngine.centerOfGravityOffset.x = -(int)command.lookV;
         gaitEngine.bodyPos.x = -(int)command.lookV;
-        // gaitEngine.centerOfGravityOffset.y = -(int)command.lookH;
         gaitEngine.bodyPos.y = -(int)command.lookH;
         gaitEngine.centerOfGravityOffset.z = 0;
     } else {
@@ -236,36 +193,32 @@ void setCenterOfGravityOffset(Commander &command){
 }
 
 void setWalkMovement(Commander &command){
-    gaitEngine.Xspeed = int(speedMultiplier*command.walkV);
-    if((command.buttons&BUT_LT) > 0){
-        gaitEngine.Yspeed = int(speedMultiplier*command.walkH);
+    // convert to -1,1 range
+    float x = float(command.walkV)/125.0;
+    float y = float(command.walkH)/125.0;
+    float sqrtX = sqrt(x);
+    float sqrtY = sqrt(y);
+    float cycleScale = max(abs(x), abs(y));
+    // 0 - 150 range
+    gaitEngine.Xspeed = int(sqrtX*MAX_GAIT_STRIDE);
+    if (x < 0.0) { gaitEngine.Xspeed = -gaitEngine.Xspeed; };
+
+    if((command.buttons&BUT_LT) > 0) {
+        gaitEngine.Yspeed = int(sqrtY*MAX_GAIT_STRIDE);
         gaitEngine.Rspeed = 0.0;
+        if (y < 0.0) { gaitEngine.Yspeed = -gaitEngine.Yspeed; };
+
     } else {
         gaitEngine.Yspeed = 0;
-        gaitEngine.Rspeed = -float(speedMultiplier*command.walkH)/250.0;
+        // range (0 - 0.5)
+        gaitEngine.Rspeed = -y*MAX_GAIT_ROTATION;
     }
+    gaitEngine.setPeriodMillis(int((1.0 / (cycleScale*0.9 + 0.1))*1000));
 }
 
 void setGaitMode(Commander &command) {
-    if(command.buttons&BUT_R1) { 
-        gaitEngine.gaitSelect( RIPPLE_SMOOTH );
-        speedMultiplier=1;
-
-    } else if(command.buttons&BUT_R2) {
-        gaitEngine.gaitSelect( RIPPLE );
-        speedMultiplier=1;
-
-    } else if(command.buttons&BUT_R3) {
+    if(command.buttons&BUT_R3) {
         gaitEngine.gaitSelect( RIPPLE_GEO );
-        speedMultiplier=1;
-
-    } else if(command.buttons&BUT_L4) { 
-        gaitEngine.gaitSelect( AMBLE_SMOOTH );
-        speedMultiplier=2;
-
-    } else if(command.buttons&BUT_L5) {
-        gaitEngine.gaitSelect( AMBLE );
-        speedMultiplier=2;
     }
 }
 
@@ -288,12 +241,13 @@ void processCommands() {
     if(command.ReadMsgs() == 0)
         return;
     // toggle LED
-    digitalWrite(0,HIGH-digitalRead(0));
+    digitalWrite(0, HIGH-digitalRead(0));
 
     // set speeds
     if ( fsm.isInState(WalkingState) ) {
         if (command.buttons & BUT_L6) {
             // goto driving mode
+            PlayTone(AX_SENSOR, TONE_C2);
             fsm.transitionTo(GotoDrivingState);
         } else {
             setGaitMode(command);
@@ -305,6 +259,7 @@ void processCommands() {
     } else if ( fsm.isInState(DrivingState) ) {
         if (command.buttons & BUT_L6) {
             // goto walk mode
+            PlayTone(AX_SENSOR, TONE_A2);
             fsm.transitionTo(GotoWalkingState);
         } else {
             setWheelMovement(command);
@@ -313,98 +268,169 @@ void processCommands() {
     }
 }
 
+// ************* Arduino **************
 
-long lastSensorTime = 0;
-void processSensors(){
-  // TODO: MiniIMU 9 DOF orientation
-    if ((millis() - lastSensorTime) < 2000) return;
+void setup() {
+    // set user LED as output
+    pinMode(0, OUTPUT);
 
-    logval("IR Top", ax12GetRegister(AX_SENSOR, AX_RIGHT_IR_DATA, 1));
-    logval("IR Front", ax12GetRegister(AX_SENSOR, AX_CENTER_IR_DATA, 1));
-    logval("IR Bottom", ax12GetRegister(AX_SENSOR, AX_LEFT_IR_DATA, 1));
-    // logval("Lum Top", ax12GetRegister(AX_SENSOR, AX_RIGHT_LUMINOSITY, 1));
-    // logval("Lum Front", ax12GetRegister(AX_SENSOR, AX_CENTER_LUMINOSITY, 1));
-    // logval("Lum Bottom", ax12GetRegister(AX_SENSOR, AX_LEFT_LUMINOSITY, 1));
+    // configure bioloid controller and engines
+    // the controller is set to hold all the servos
+    // individual engines will then limit and set up the active set of servos needed
+    bioloidController.setup(AX_SERVO_COUNT);
+    gaitEngine.setBioloidController(&bioloidController);
+    wheelEngine.setBioloidController(&bioloidController);
+    turretEngine.setBioloidController(&bioloidController);
 
-    //PlayTone(AX_SENSOR, 40);
+    // initialize the bioloid dynamixel bus communicationss
+    ax12Init(1000000l);
+    Wire.begin();
+    TWBR = ((F_CPU / 400000) - 16) / 2;//set the I2C speed to 400KHz
+    command.begin(38400);
+    Serial.println("********* Stikklar *********");
+    delay(2000);
 
+    // setup serial for usage with the Commander
+    
+    float voltage = getVoltage();
+    if (voltage < MIN_VOLTAGE) {
+        emergencyShutdown(voltage);
+        // stop everything
+        while(1) {};
+    }
+    logval("Voltage", voltage);
 
-    lastSensorTime = millis();
+    // power up beep
+    PlayTone(AX_SENSOR, TONE_E2);
+
+    imu.initialize();
+
+    // calibration done beep
+    PlayTone(AX_SENSOR, TONE_C2);
+
+    // initialize walker and rise slowly
+    setupWalkMode();
+    turretEngine.updateServos();
+    gaitEngine.setupIK();
+    gaitEngine.gaitSelect(RIPPLE_GEO);
+    gaitEngine.readPose();
+    gaitEngine.slowStart(2000);
+
+    // setup scheduler tasks
+    // this should loop over all 18 servos in 1800ms
+    //scheduler.addJob(monitorDynamixel, 100);
+    scheduler.addJob(updateIMU, 20);
+    scheduler.addJob(outputAHRS, 100);
+    //scheduler.addJob(monitorVoltage, 1000);
+    scheduler.addJob(processCommands, 50);
+    scheduler.addJob(updateFSM, 166);
 }
+
+// used to halt all processes
+bool doUpdates = true;
 
 void loop(){
-    monitorDynamixel();
-    processCommands();
-    //processSensors();
+    if (doUpdates) {
+        scheduler.scheduler();
+    }
+}
 
+// **************** Jobs ***********************
+
+void updateFSM() {
     fsm.update();
-    turretEngine.updateServos();
 }
 
-int ax12Ping(int id){
-    setTX(id);
-    // 0xFF 0xFF ID LENGTH INSTRUCTION PARAM... CHECKSUM    
-    int checksum = ~((id + 0x02 + AX_PING) % 256);
-    ax12writeB(0xFF);
-    ax12writeB(0xFF);
-    ax12writeB(byte(id));
-    ax12writeB(0x02);    // length
-    ax12writeB(AX_PING);
-    ax12writeB(checksum);  
-    setRX(id);    
-    if(ax12ReadPacket(6) > 0){
-        // return the error
-        return ax_rx_buffer[4];
-    }else{
-        return -1;
+void updateIMU() {
+    imu.update();
+    imu.updateEulerAngles();
+    blackboard.pitch = imu.pitch;
+    blackboard.yaw = imu.yaw;
+    blackboard.roll = imu.roll;
+}
+
+void monitorVoltage() {
+    float voltage = getVoltage();
+    if (voltage < MIN_VOLTAGE) {
+        emergencyShutdown(voltage);
+        doUpdates = false;
     }
 }
 
-long lastMonitorTime = 0;
-
+char nextServoMonitorId = 1;
 void monitorDynamixel() {
-    if ((millis() - lastMonitorTime) < 5000) return;
-    int error;
-    for(int id=1; id <= 16; id++) {
-        error = ax12Ping(id);
-        if (error > 0) writeErrors(id, error);
+    if (readAxServoInfo(nextServoMonitorId)) {
+        int error = blackboard.axError[nextServoMonitorId-1];
+        if (error > 0) writeErrors(nextServoMonitorId, error);
     }
-    
-    lastMonitorTime = millis();
+    nextServoMonitorId = nextServoMonitorId % AX_SERVO_COUNT;
+    nextServoMonitorId++;
 }
 
+// ************* Utility ***********************
 void writeErrors(int id, int error) {
     log("Error id="); log(id); 
-// ERR_VOLTAGE                 1
+    // ERR_VOLTAGE                 1
     if (error&ERR_VOLTAGE) log(" voltage");
-// ERR_ANGLE_LIMIT             2
+    // ERR_ANGLE_LIMIT             2
     if (error&ERR_ANGLE_LIMIT) log(" angle");
-// ERR_OVERHEATING             4
+    // ERR_OVERHEATING             4
     if (error&ERR_OVERHEATING) log(" heat");
-// ERR_RANGE                   8
+    // ERR_RANGE                   8
     if (error&ERR_RANGE) log(" range");
-// ERR_CHECKSUM                16
+    // ERR_CHECKSUM                16
     if (error&ERR_CHECKSUM) log(" checksum");
-// ERR_OVERLOAD                32
+    // ERR_OVERLOAD                32
     if (error&ERR_OVERLOAD) log(" overload");
-// ERR_INSTRUCTION             64
+    // ERR_INSTRUCTION             64
     if (error&ERR_INSTRUCTION) log(" instruction");
 
     logln("");
 
-    PlayTone(AX_SENSOR, 13);
+    PlayTone(AX_SENSOR, TONE_Gb0);
 }
 
-// #define LED_RED 0x01
-// #define LED_GREEN 0x02
-// #define LED_BLUE 0x04
+float getVoltage() {
+    // check the voltage (LiPO safety)
+    return ax12GetRegister(AX_SENSOR, AX_PRESENT_VOLTAGE, 1) / 10.0;
+}
 
-// void setLEDs() {
-//     for(int id=1; id <= 16; id++) {
-//         if (id % 2 == 0) {
-//             ax12SetRegister(id, AX_LED, LED_BLUE);
-//         } else {
-//             ax12SetRegister(id, AX_LED, LED_RED);
-//         }
-//     } 
-// }
+void emergencyShutdown(float voltage) {
+    Serial.println("We should really power down now");
+
+    // power down all AX servo motors
+    setTorque(false);
+    Serial.print("Voltage: ");
+    Serial.print(voltage);
+    Serial.println("Warning! Voltage is below minimum safe LiPO values");
+    Serial.println("All processes have been halted and servo torque disabled.");
+
+    // warn the user
+    PlayTone(AX_SENSOR, TONE_E0);
+    delay(500);
+    PlayTone(AX_SENSOR, TONE_C0);
+}
+
+void setTorque(bool enable) {
+    byte torque = 0x00;
+    if (enable) { torque = 0x01; };
+
+    int length = 4 + (AX_SERVO_COUNT * 2);   // 3 = id + torque enable
+    int checksum = 254 + length + AX_SYNC_WRITE + 2 + AX_TORQUE_ENABLE;
+    setTXall();
+    ax12write(0xFF);
+    ax12write(0xFF);
+    ax12write(0xFE);
+    ax12write(length);
+    ax12write(AX_SYNC_WRITE);
+    ax12write(AX_TORQUE_ENABLE);
+    ax12write(1);
+    for(int id=1; id<=AX_SERVO_COUNT; id++)
+    {
+        checksum += torque + id;
+        ax12write(id);
+        ax12write(torque);
+    } 
+    ax12write(0xff - (checksum % 256));
+    setRX(0);
+}

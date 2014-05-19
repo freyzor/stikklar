@@ -33,10 +33,6 @@ void WheelEngine::setupContoller() {
 	controller->setId(WE_RR_TURN, RR_COXA);
 	// sest the wheel servos to continouse rotation mode
 	writeWheelMode();
-	// setupServoSet(WE_RF_TURN, WE_RF_WHEEL, RF_COXA, RF_WHEEL, RF_TURN_SIGN, RF_WHEEL_SIGN, RF_COXA_WHEEL_NEUTRAL);
-	// setupServoSet(WE_LF_TURN, WE_LF_WHEEL, LF_COXA, LF_WHEEL, LF_TURN_SIGN, LF_WHEEL_SIGN, LF_COXA_WHEEL_NEUTRAL);
-	// setupServoSet(WE_LR_TURN, WE_LR_WHEEL, LR_COXA, LR_WHEEL, LR_TURN_SIGN, LR_WHEEL_SIGN, LR_COXA_WHEEL_NEUTRAL);
-	// setupServoSet(WE_RR_TURN, WE_RR_WHEEL, RR_COXA, RR_WHEEL, RR_TURN_SIGN, RR_WHEEL_SIGN, RR_COXA_WHEEL_NEUTRAL);
 }
 
 
@@ -47,40 +43,32 @@ void WheelEngine::doUpdate() {
 	}
 	// solve outward rear wheel
 	float steeringRadian = MIN_ANGLE_RAD*abs(steering);
-	// front radius
-	float out_front_radius = WHEEL_X_LENGTH / tan(steeringRadian);
-	float in_front_radius = out_front_radius - WHEEL_Y_LENGTH;
+	// center radius, inner and outer
+	float out_center_radius = WHEEL_X_LENGTH / tan(steeringRadian);
+	float in_center_radius = out_center_radius - WHEEL_Y_LENGTH;
 
-	float in_rear_radian = atan(WHEEL_X_LENGTH / in_front_radius);
+	float inner_turn_radian = atan(WHEEL_X_LENGTH / in_center_radius);
 	// rear radius
-	float out_rear_radius = WHEEL_X_LENGTH / sin(steeringRadian);
-	float in_rear_radius = WHEEL_X_LENGTH / sin(in_rear_radian);
+	float outer_turn_radius = WHEEL_X_LENGTH / sin(steeringRadian);
+	float inner_turn_radius = WHEEL_X_LENGTH / sin(inner_turn_radian);
 
-	int in_rear_steering = (in_rear_radian / MIN_ANGLE_RAD) + 0.5;
+	int inner_steering = (inner_turn_radian / MIN_ANGLE_RAD) + 0.5;
 
 	// calculate speed for each wheel
 	// scale based on the outer rear wheel, always the fastest moving wheel.
-	int out_rear_speed = speed;
-	// int out_front_speed = (speed * (out_front_radius/out_rear_radius) + 0.5);
-	int in_rear_speed = (speed * (in_rear_radius/out_rear_radius) + 0.5);
-	// int in_front_speed = (speed * (in_front_radius/out_rear_radius) + 0.5);
+	int outer_speed = speed;
+
+	int inner_speed = (speed * (inner_turn_radius/outer_turn_radius) + 0.5);
 
 	if (steering > 0) {
-		updateServos(in_rear_steering, steering, in_rear_speed, out_rear_speed, out_rear_speed, in_rear_speed);
+		updateServos(inner_steering, steering, inner_speed, outer_speed, outer_speed, inner_speed);
 	} else {
-		updateServos(steering, -in_rear_steering, out_rear_speed, in_rear_speed, in_rear_speed, out_rear_speed);
+		updateServos(steering, -inner_steering, outer_speed, inner_speed, inner_speed, outer_speed);
 	} 
 }
 
 void WheelEngine::update() {
-	//if our previous interpolation is complete, recompute the IK
-	// if(controller->interpolating == 0){
-		doUpdate();
-	// 	controller->interpolateSetup(65);
-	// }
-
-	// // update joints
-	// controller->interpolateStep();	
+	doUpdate();	
 }
 
 void WheelEngine::updateServos(

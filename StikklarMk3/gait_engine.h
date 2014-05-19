@@ -26,7 +26,7 @@
 // Standard Transition time should be of the form (k*BIOLOID_FRAME_LENGTH)-1
 // for maximal accuracy. BIOLOID_FRAME_LENGTH = 33ms, so good options include:
 // 32, 65, 98, etc...
-#define STD_TRANSITION          98
+#define STD_TRANSITION          65
 
 class GaitEngine {
 public:
@@ -40,10 +40,10 @@ public:
     void setupIK();
 	void gaitSelect(int GaitType);
 	void setStepToTarget(int x, int y, int z, long msec);
-	bool isSteppingTo();
 	bool isContiouslySteppingTo();
 	void cacheGaits();
 	void restoreCachedGaits();
+	void setPeriodMillis(int millis);
 
     //Parameters for manipulating body position 
 	vec3 bodyRot;
@@ -53,6 +53,8 @@ public:
 	int Xspeed;
 	int Yspeed;
 	float Rspeed;
+
+
 	// bodyPos already does x,y of this it seems
 	ik_req_t centerOfGravityOffset;
 private:
@@ -66,28 +68,21 @@ private:
 
 	char  legJoints[4][3];
 
-	unsigned long gaitStartTime;	// the milli time when gait was started
-	float gaitCycleSignal;			// the position with in the step cycle
-	float deltaCycleSignal;   		// the delta time between current step and the last
+	// cycle period time variables
+	unsigned long lastFrameMillis;	// the last frame start time in milliseconds
+	unsigned long gaitStartMillis;	// the start time of the gait
+	float normalizeSignalTime;		// the normalized position [0, 1) within the cycle period
+	float frameTime;   				// the delta time between current frame and the last
+	int periodMillis;
 
-	int tranTime;
-	int cycleTimeMillis;
-	float cycleTime;
-	int stepsInCycle;
 	int liftHeight;
-	int step;
 	int currentGait;
-	int gaitLegNo[LEG_COUNT];   // order to move legs in
-
 	float gaitLegOffset[LEG_COUNT];
-	// relative to leg quadrant
-	ik_req_t gaits[LEG_COUNT];  // gait positions
+	ik_req_t gaits[LEG_COUNT];  // gait positions relative to leg quadrant
 	ik_req_t cachedGaits[LEG_COUNT];  // cached gait positions
 
-	int pushSteps;
+	// step to variables
 	ik_req_t nextEndPoint;
-	int stepToStepCounter;
-	ik_req_t stepToVector;
 	vec2 stepToVectors[LEG_COUNT];
 	long stepToMSec;
 	// COG - center of gravity
@@ -98,17 +93,12 @@ private:
 
 	// Gait methods
 	// implemented gait types methods
-	void DefaultGaitSetup() {};
-	ik_req_t DefaultGaitGen(char leg);
-	ik_req_t SmoothGaitGen(char leg);
-	ik_req_t StepToGaitGen(char leg);
-	void setupStepToGait();
-	
 	ik_req_t ContinuousGaitGen(char leg);
 	void ContinuousGaitSetup();
-
+	// special step to gait
 	ik_req_t ContinuousStepToGaitGen(char legId);
 	void setupContinousStepToGait();
+	void setupGeoRippleGait();
 
 	void doIK();
 	// setup the starting positions of the legs.
@@ -128,12 +118,12 @@ private:
 	vec2 calculateCogVector(vec2 cog, vec2 leg_a, vec2 leg_b);
 	float updateCogDampening();
 
-	void setupGeoRippleGait();
-
 	// gait update steps
 	void updateGaitAndFootPositions();
 	void adjustFootPositionsByBodyFrame();
 	void solveAndUpdateLegJoints();
+
+	void updateFrameTime();
 };
 
 #endif
